@@ -1,22 +1,24 @@
-import { useState } from 'react'
-import reactLogo from './assets/react.svg'
-import viteLogo from './assets/vite.svg'
-import heroImg from './assets/hero.png'
-import './App.css'
+import { Routes, Route, Link } from 'react-router-dom';
+import Home from './pages/Home';
+import Login from './pages/Login';
+import About from './pages/About';
 
 function App() {
   return (
-    <div className="min-h-screen bg-slate-100 flex items-center justify-center">
-      <div className="rounded-2xl bg-white p-10 shadow-lg">
-        <h1 className="text-4xl font-bold text-blue-600">
-          Tailwind CSS 연결 성공!
-        </h1>
-        <p className="mt-4 text-gray-600">
-          React + Vite + Tailwind 세팅 완료
-        </p>
-      </div>
+    <div className="p-8">
+      <nav className="mb-6 flex gap-4">
+        <Link to="/">홈</Link>
+        <Link to="/login">로그인</Link>
+        <Link to="/about">소개</Link>
+      </nav>
+
+      <Routes>
+        <Route path="/" element={<Home />} />
+        <Route path="/login" element={<Login />} />
+        <Route path="/about" element={<About />} />
+      </Routes>
     </div>
-  )
+  );
 }
 
-export default App
+export default App;
