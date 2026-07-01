@@ -1,6 +1,16 @@
-import { useState } from 'react';
-import { type SavedUser, type Carrier, type AuthMethod, isValidPhone, normalizeId, normalizePhone, CarrierSelect, PhoneInput, AuthMethodSelector } from './Header';
-import { ModalTitle } from './ModalTitle';
+import { useState } from 'react'
+import {
+  type SavedUser,
+  type Carrier,
+  type AuthMethod,
+  CarrierSelect,
+  PhoneInput,
+  AuthMethodSelector,
+  normalizePhone,
+  isValidPhone,
+  normalizeId,
+} from './authShared'
+import { ModalTitle } from './ModalTitle'
 
 export function FindPasswordView({
   getSavedUsers, onBack,

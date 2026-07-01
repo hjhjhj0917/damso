@@ -1,14 +1,16 @@
-import { useState } from 'react';
-import { type SavedUser, type Carrier, type AuthMethod, CarrierSelect, PhoneInput, AuthMethodSelector } from './Header';
-import { ModalTitle } from './ModalTitle';
 
-function normalizePhone(value: string) {
-  return value.trim().replaceAll('-', '')
-}
-
-function isValidPhone(value: string) {
-  return /^01[016789]\d{7,8}$/.test(normalizePhone(value))
-}
+import { useState } from 'react'
+import {
+  type SavedUser,
+  type Carrier,
+  type AuthMethod,
+  CarrierSelect,
+  PhoneInput,
+  AuthMethodSelector,
+  normalizePhone,
+  isValidPhone,
+} from './authShared'
+import { ModalTitle } from './ModalTitle'
 
 export function FindIdView({
   getSavedUsers,
