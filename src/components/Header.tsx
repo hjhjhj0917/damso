@@ -1,5 +1,5 @@
-import { type FormEvent, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { type FormEvent, useEffect, useState } from 'react'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { FindIdView } from './FindIdView'
 import { FindPasswordView } from './FindPasswordView'
 import { normalizeId, type SavedUser } from './authShared'
@@ -8,36 +8,60 @@ type LoginModalMode = 'login' | 'findId' | 'findPassword'
 
 function Header() {
   const [isLoginOpen, setIsLoginOpen] = useState(false)
+  const location = useLocation()
+  const navigate = useNavigate()
+
+  useEffect(() => {
+    const searchParams = new URLSearchParams(location.search)
+    const shouldOpenLogin = searchParams.get('login')
+    if (shouldOpenLogin === 'true') setIsLoginOpen(true)
+
+    const hasAutoLogin = localStorage.getItem('ansimAutoLogin') === 'true'
+    const hasSession = localStorage.getItem('ansimSession') !== null
+    if (
+      hasAutoLogin &&
+      hasSession &&
+      location.pathname === '/' &&
+      shouldOpenLogin !== 'true'
+    ) {
+      navigate('/dashboard', { replace: true })
+    }
+  }, [location.pathname, location.search, navigate])
+
+  const closeLogin = () => {
+    setIsLoginOpen(false)
+    navigate('/', { replace: true })
+  }
+
+  if (location.pathname.startsWith('/dashboard')) return null
 
   return (
     <>
       <header className="sticky top-0 z-50 border-b border-slate-200 bg-white/90 backdrop-blur-md">
         <div className="mx-auto flex h-20 max-w-7xl items-center justify-between px-5 sm:px-8">
           <Link to="/" className="flex items-center gap-3">
-            <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-blue-600 text-2xl text-white shadow-md">
-              ♡
-            </div>
+            <img src="/logo.svg" alt="담소" className="h-11 w-11 rounded-2xl shadow-md" />
             <span className="text-2xl font-extrabold tracking-tight text-slate-900">
-              안심지키미
+              담소
             </span>
           </Link>
 
           <nav className="hidden items-center gap-10 text-[17px] font-semibold text-slate-700 md:flex">
-            <a href="#service" className="hover:text-blue-600">
+            <a href="/#service" className="hover:text-blue-600">
               서비스 소개
             </a>
-            <a href="#ai" className="hover:text-blue-600">
-              AI 서비스
+            <a href="/#ai" className="hover:text-blue-600">
+              도담의 원칙
             </a>
-            <a href="#care" className="hover:text-blue-600">
-              안심 기능
+            <a href="/#care" className="hover:text-blue-600">
+              돌봄 과정
             </a>
-            <a href="#guide" className="hover:text-blue-600">
+            <a href="/#guide" className="hover:text-blue-600">
               사용 가이드
             </a>
-            <a href="#contact" className="hover:text-blue-600">
+            <Link to="/support" className="hover:text-blue-600">
               고객센터
-            </a>
+            </Link>
           </nav>
 
           <div className="flex items-center gap-3">
@@ -59,7 +83,7 @@ function Header() {
         </div>
       </header>
 
-      {isLoginOpen && <LoginModal onClose={() => setIsLoginOpen(false)} />}
+      {isLoginOpen && <LoginModal onClose={closeLogin} />}
     </>
   )
 }
@@ -71,6 +95,7 @@ function LoginModal({ onClose }: { onClose: () => void }) {
 
   const [userId, setUserId] = useState('')
   const [password, setPassword] = useState('')
+  const [autoLogin, setAutoLogin] = useState(false)
   const [loginError, setLoginError] = useState(false)
 
   const getSavedUsers = (): SavedUser[] => {
@@ -86,12 +111,42 @@ function LoginModal({ onClose }: { onClose: () => void }) {
     const normalizedInputId = normalizeId(userId)
 
     const isDemoUser = userId === 'demo' && password === '1234'
+    const isGuardianDemoUser = userId === 'guardian' && password === '1234'
 
     const isSignupUser = users.some((user) => {
       return normalizeId(user.id) === normalizedInputId && user.password === password
     })
 
-    if (isDemoUser || isSignupUser) {
+    if (isDemoUser || isGuardianDemoUser || isSignupUser) {
+      const matchedUser = users.find(
+        (user) => normalizeId(user.id) === normalizedInputId,
+      )
+      const demoGuardianSession = {
+        id: 'guardian',
+        name: '김민수',
+        phone: '01098765432',
+        accountType: 'guardian' as const,
+        parentName: '김순자',
+        parentPhone: '01012345678',
+        parentRelation: '자녀',
+      }
+      localStorage.setItem(
+        'ansimSession',
+        JSON.stringify(isGuardianDemoUser ? demoGuardianSession : {
+          id: matchedUser?.id ?? 'demo',
+          name: matchedUser?.name ?? '김순자',
+          phone: matchedUser?.phone ?? '01012345678',
+          accountType: matchedUser?.accountType ?? 'user',
+          parentName: matchedUser?.parent?.name,
+          parentPhone: matchedUser?.parent?.phone,
+          parentRelation: matchedUser?.parent?.relation,
+        }),
+      )
+      if (autoLogin) {
+        localStorage.setItem('ansimAutoLogin', 'true')
+      } else {
+        localStorage.removeItem('ansimAutoLogin')
+      }
       setLoginError(false)
       onClose()
       navigate('/dashboard')
@@ -102,7 +157,12 @@ function LoginModal({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center overflow-y-auto bg-slate-950/60 px-5 py-8 backdrop-blur-sm">
+    <div
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose()
+      }}
+      className="fixed inset-0 z-[100] flex items-center justify-center overflow-y-auto bg-slate-950/60 px-5 py-8 backdrop-blur-sm"
+    >
       <div className="relative w-full max-w-[560px] rounded-[2rem] bg-white p-7 shadow-2xl sm:p-9">
         <button
           type="button"
@@ -116,9 +176,11 @@ function LoginModal({ onClose }: { onClose: () => void }) {
           <LoginView
             userId={userId}
             password={password}
+            autoLogin={autoLogin}
             loginError={loginError}
             setUserId={setUserId}
             setPassword={setPassword}
+            setAutoLogin={setAutoLogin}
             handleLogin={handleLogin}
             onFindId={() => {
               setLoginError(false)
@@ -153,9 +215,11 @@ function LoginModal({ onClose }: { onClose: () => void }) {
 function LoginView({
   userId,
   password,
+  autoLogin,
   loginError,
   setUserId,
   setPassword,
+  setAutoLogin,
   handleLogin,
   onFindId,
   onFindPassword,
@@ -163,9 +227,11 @@ function LoginView({
 }: {
   userId: string
   password: string
+  autoLogin: boolean
   loginError: boolean
   setUserId: (value: string) => void
   setPassword: (value: string) => void
+  setAutoLogin: (value: boolean) => void
   handleLogin: (event: FormEvent<HTMLFormElement>) => void
   onFindId: () => void
   onFindPassword: () => void
@@ -178,14 +244,12 @@ function LoginView({
   return (
     <>
       <div className="mb-8 text-center">
-        <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-3xl bg-blue-600 text-3xl text-white shadow-lg">
-          ♡
-        </div>
+        <img src="/logo.svg" alt="담소" className="mx-auto h-16 w-16 rounded-3xl shadow-lg" />
 
         <h2 className="mt-5 text-4xl font-black text-slate-950">로그인</h2>
 
         <p className="mt-3 text-lg leading-8 text-slate-600">
-          안심지키미 서비스를 이용하려면
+          담소 서비스를 이용하려면
           <br />
           로그인이 필요합니다.
         </p>
@@ -201,7 +265,7 @@ function LoginView({
               value={userId}
               onChange={(event) => setUserId(event.target.value)}
               type="text"
-              placeholder="이메일 또는 전화번호를 입력하세요"
+              placeholder="아이디를 입력하세요"
               className="h-16 w-full rounded-2xl border-2 border-slate-200 bg-slate-50 px-5 text-xl font-semibold outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:bg-white"
             />
           </div>
@@ -225,6 +289,19 @@ function LoginView({
             )}
           </div>
         </div>
+
+        <label className="mt-5 flex cursor-pointer items-center gap-3 text-base font-bold text-slate-600">
+          <input
+            type="checkbox"
+            checked={autoLogin}
+            onChange={(event) => setAutoLogin(event.target.checked)}
+            className="h-5 w-5 accent-blue-600"
+          />
+          자동 로그인
+          <span className="ml-auto text-sm font-medium text-slate-400">
+            다음 방문부터 바로 시작
+          </span>
+        </label>
 
         <button
           type="submit"

@@ -2,6 +2,19 @@ export type Carrier = 'SKT' | 'KT' | 'LG U+' | '알뜰폰'
 
 export type AuthMethod = '문자인증' | 'pass'
 
+export type AccountType = 'user' | 'guardian'
+
+export type ParentProfile = {
+  name: string
+  birthDate?: string
+  residentFront: string
+  residentBackFirst: string
+  phone: string
+  relation: string
+  address: string
+  consentAt: string
+}
+
 type UserIdType = 'email' | 'phone'
 
 export type SavedUser = {
@@ -13,6 +26,8 @@ export type SavedUser = {
   name: string
   residentFront: string
   residentBackFirst: string
+  accountType?: AccountType
+  parent?: ParentProfile
 }
 
 export function getUserIdType(value: string): UserIdType | null {

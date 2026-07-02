@@ -1,13 +1,16 @@
+import { useState } from 'react'
+import { Link } from 'react-router-dom'
+
 function Home() {
   return (
     <main className="overflow-hidden pb-24 md:pb-0">
       <HeroSection />
       <ServiceIntro />
+      <AiServiceSection />
       <CareProcess />
       <StorySection />
       <ProductSection />
       <GuideSection />
-      <AiServiceSection />
       <Footer />
       <MobileBottomNav />
     </main>
@@ -15,156 +18,173 @@ function Home() {
 }
 
 function HeroSection() {
+  const [callConfirmOpen, setCallConfirmOpen] = useState(false)
+
   return (
     <section className="relative bg-gradient-to-br from-blue-50 via-white to-sky-50">
       <div className="mx-auto grid min-h-[720px] max-w-7xl items-center gap-12 px-5 py-14 sm:px-8 lg:grid-cols-2 lg:py-20">
         <div>
           <div className="mb-5 inline-flex rounded-full bg-blue-100 px-5 py-3 text-base font-bold text-blue-700">
-            AI 기반 노년 안심 케어 서비스
+            AI 파트너 도담과 함께하는 생활 돌봄 서비스
           </div>
 
           <h1 className="text-[44px] font-black leading-tight tracking-tight text-slate-950 sm:text-[58px] lg:text-[68px]">
-            당신의 이야기를
+            멀리 있어도,
             <br />
-            <span className="text-blue-600">목소리로 기록하세요</span>
+            <span className="text-blue-600">돌봄은 가까이</span>
           </h1>
 
           <p className="mt-7 max-w-xl text-xl leading-9 text-slate-700 sm:text-2xl">
-            음성으로 쉽게 일기와 자서전을 작성하고, 건강 상태와 일상 변화를
-            가족과 함께 확인할 수 있습니다.
+            도담이 피보호인의 대화와 목소리를 기록하고 건강 변화를 살펴,
+            필요한 진료와 돌봄을 가족에게 이어드립니다.
           </p>
 
           <div className="mt-9 flex flex-col gap-4 sm:flex-row">
-            <button className="min-h-16 rounded-full bg-blue-600 px-9 text-xl font-extrabold text-white shadow-xl shadow-blue-200 transition hover:bg-blue-700">
-              🎙 시작하기
-            </button>
-            <button className="min-h-16 rounded-full border-2 border-blue-200 bg-white px-9 text-xl font-extrabold text-blue-700 transition hover:bg-blue-50">
-              📞 010.3422.5807
+            <Link
+              to="/?login=true"
+              className="inline-flex min-h-16 items-center justify-center rounded-full bg-blue-600 px-9 text-xl font-extrabold text-white shadow-xl shadow-blue-200 transition hover:bg-blue-700"
+            >
+              도담과 시작하기
+            </Link>
+            <button onClick={() => setCallConfirmOpen(true)} className="inline-flex min-h-16 items-center justify-center rounded-full border-2 border-blue-200 bg-white px-9 text-xl font-extrabold text-blue-700 transition hover:bg-blue-50">
+              📞 0000-0000
             </button>
           </div>
 
           <div className="mt-10 grid grid-cols-2 gap-4 sm:grid-cols-4">
-            <MiniFeature icon="🛡️" title="24시간 보호" />
-            <MiniFeature icon="🔔" title="보호자 알림" />
-            <MiniFeature icon="🎙️" title="음성 기록" />
-            <MiniFeature icon="❤️" title="건강 확인" />
+            <MiniFeature icon="🌼" title="AI 파트너" />
+            <MiniFeature icon="🎙️" title="자동 기록" />
+            <MiniFeature icon="❤️" title="건강 케어" />
+            <MiniFeature icon="🔄" title="가족 동기화" />
           </div>
         </div>
 
-        <div className="relative">
-          <div className="absolute -left-6 top-10 hidden rounded-3xl bg-white px-6 py-4 text-lg font-bold shadow-xl lg:block">
-            🔊 오늘 날씨가 참 좋았어요
-          </div>
-
-          <div className="absolute -right-2 bottom-20 hidden rounded-3xl bg-white px-6 py-4 text-lg font-bold shadow-xl lg:block">
-            💬 오래 기억하고 싶은 하루예요
-          </div>
-
-          <div className="rounded-[3rem] bg-white p-5 shadow-2xl">
-            <div className="rounded-[2.5rem] bg-gradient-to-br from-blue-100 to-white p-6">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-blue-600 text-white">
-                    ♡
-                  </div>
-                  <span className="text-xl font-black">안심지키미</span>
-                </div>
-                <span className="text-2xl">☰</span>
-              </div>
-
-              <div className="mt-10 rounded-[2rem] bg-white/80 p-8 text-center shadow-inner">
-                <div className="mx-auto flex h-36 w-36 items-center justify-center rounded-full bg-gradient-to-br from-amber-100 to-orange-100 text-7xl">
-                  👵
-                </div>
-                <h2 className="mt-8 text-3xl font-black leading-snug text-slate-950">
-                  오늘의 이야기를
-                  <br />
-                  <span className="text-blue-600">남겨보세요</span>
-                </h2>
-                <p className="mt-4 text-lg leading-8 text-slate-600">
-                  버튼 하나로 음성 기록을 시작할 수 있어요.
-                </p>
-                <button className="mt-7 min-h-14 rounded-2xl bg-blue-600 px-8 text-lg font-black text-white shadow-lg">
-                  기록 시작하기
-                </button>
-              </div>
-
-              <div className="mt-5 grid grid-cols-2 gap-4">
-                <AppCard icon="🎙️" title="음성 기록" text="말로 편하게 기록" />
-                <AppCard icon="📅" title="체계적 관리" text="일상을 쉽게 정리" />
-                <AppCard icon="📊" title="건강 리포트" text="변화를 확인" />
-                <AppCard icon="👨‍👩‍👧" title="가족 공유" text="소중한 추억 공유" />
-              </div>
+        <HeroCareVisual />
+      </div>
+      {callConfirmOpen && (
+        <div
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setCallConfirmOpen(false)
+          }}
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/55 px-5 backdrop-blur-sm"
+        >
+          <div role="dialog" aria-modal="true" aria-labelledby="call-confirm-title" className="w-full max-w-md rounded-[2rem] bg-white p-7 text-center shadow-2xl sm:p-8">
+            <span className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-blue-50 text-3xl">☎️</span>
+            <h2 id="call-confirm-title" className="mt-5 text-2xl font-black text-slate-950">고객센터로 전화 연결</h2>
+            <p className="mt-3 text-base leading-7 text-slate-600">0000-0000 고객센터로<br />전화를 연결하시겠습니까?</p>
+            <p className="mt-3 text-xs font-bold text-slate-400">상담 시간 · 평일 09:00–18:00</p>
+            <div className="mt-7 grid grid-cols-2 gap-3">
+              <button onClick={() => setCallConfirmOpen(false)} className="h-13 rounded-xl bg-slate-100 font-black text-slate-600 hover:bg-slate-200">아니오</button>
+              <button onClick={() => { setCallConfirmOpen(false); window.location.href = 'tel:00000000' }} className="h-13 rounded-xl bg-blue-600 font-black text-white shadow-lg shadow-blue-200 hover:bg-blue-700">예</button>
             </div>
           </div>
         </div>
-      </div>
+      )}
     </section>
   )
 }
 
 function MiniFeature({ icon, title }: { icon: string; title: string }) {
   return (
-    <div className="rounded-3xl bg-white p-5 text-center shadow-md">
-      <div className="text-3xl">{icon}</div>
-      <p className="mt-3 text-base font-black text-slate-800">{title}</p>
+    <div className="flex items-center gap-3 border-l-2 border-blue-100 pl-4">
+      <div className="flex h-10 w-10 items-center justify-center rounded-full bg-white text-xl shadow-sm">{icon}</div>
+      <p className="text-sm font-black text-slate-700">{title}</p>
     </div>
   )
 }
 
-function AppCard({
-  icon,
-  title,
-  text,
-}: {
-  icon: string
-  title: string
-  text: string
-}) {
+function HeroCareVisual() {
   return (
-    <div className="rounded-3xl bg-white p-5 shadow-md">
-      <div className="text-3xl">{icon}</div>
-      <h3 className="mt-3 text-lg font-black">{title}</h3>
-      <p className="mt-1 text-base text-slate-600">{text}</p>
+    <div className="relative mx-auto w-full max-w-[620px] py-8 lg:py-0">
+      <div className="absolute left-10 top-0 h-48 w-48 rounded-full bg-cyan-200/40 blur-3xl" />
+      <div className="absolute bottom-0 right-6 h-56 w-56 rounded-full bg-blue-300/30 blur-3xl" />
+
+      <div className="relative min-h-[570px] overflow-hidden rounded-[2.5rem] border border-white/80 bg-white/65 p-6 shadow-[0_30px_80px_-30px_rgba(30,64,175,0.35)] backdrop-blur-xl sm:p-8">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <img src="/logo.svg" alt="담소" className="h-10 w-10 rounded-xl" />
+            <div><p className="text-xs font-black tracking-[0.18em] text-blue-600">DAMSO CARE FLOW</p><p className="text-sm font-bold text-slate-400">대화에서 돌봄까지</p></div>
+          </div>
+          <span className="rounded-full bg-emerald-50 px-3 py-1.5 text-xs font-black text-emerald-600">● 실시간 연결</span>
+        </div>
+
+        <svg className="pointer-events-none absolute inset-0 h-full w-full" viewBox="0 0 620 570" fill="none" aria-hidden="true">
+          <path d="M310 174 C210 174 190 210 165 258" stroke="#BFDBFE" strokeWidth="2" strokeDasharray="7 8" />
+          <path d="M310 174 C410 174 438 210 458 258" stroke="#BFDBFE" strokeWidth="2" strokeDasharray="7 8" />
+          <path d="M165 337 C200 390 235 404 310 410" stroke="#BFDBFE" strokeWidth="2" strokeDasharray="7 8" />
+          <path d="M458 337 C425 390 385 404 310 410" stroke="#BFDBFE" strokeWidth="2" strokeDasharray="7 8" />
+        </svg>
+
+        <div className="relative mx-auto mt-10 flex w-fit flex-col items-center">
+          <div className="absolute inset-0 scale-150 rounded-full bg-blue-200/30 blur-2xl" />
+          <div className="relative flex h-28 w-28 items-center justify-center rounded-full border-[10px] border-white bg-gradient-to-br from-amber-100 to-orange-100 text-5xl shadow-xl">🌼</div>
+          <span className="relative mt-3 rounded-full bg-slate-900 px-4 py-1.5 text-xs font-black text-white">AI 파트너 도담</span>
+        </div>
+
+        <div className="relative mt-8 grid gap-4 sm:grid-cols-2">
+          <div className="rounded-2xl border border-blue-100 bg-white p-5 shadow-lg shadow-blue-100/60">
+            <div className="flex items-center justify-between"><span className="text-xl">🎙️</span><span className="text-[10px] font-black text-blue-600">VOICE DETECTED</span></div>
+            <p className="mt-3 text-sm font-black text-slate-800">“오늘 무릎이 조금 불편했어”</p>
+            <p className="mt-2 text-xs leading-5 text-slate-400">목소리와 대화 맥락을 기록했어요</p>
+          </div>
+          <div className="rounded-2xl border border-violet-100 bg-white p-5 shadow-lg shadow-violet-100/60">
+            <div className="flex items-center justify-between"><span className="text-xl">📘</span><span className="text-[10px] font-black text-violet-600">AUTO NOTE</span></div>
+            <p className="mt-3 text-sm font-black text-slate-800">데일리노트 자동 완성</p>
+            <p className="mt-2 text-xs leading-5 text-slate-400">일상과 건강 언급을 나눠 정리했어요</p>
+          </div>
+          <div className="rounded-2xl border border-rose-100 bg-white p-5 shadow-lg shadow-rose-100/60">
+            <div className="flex items-center justify-between"><span className="text-xl">❤️</span><span className="text-[10px] font-black text-rose-600">HEALTH SIGNAL</span></div>
+            <p className="mt-3 text-sm font-black text-slate-800">건강 변화 살펴보기</p>
+            <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-slate-100"><div className="h-full w-[78%] rounded-full bg-gradient-to-r from-emerald-400 to-blue-500" /></div>
+            <p className="mt-2 text-xs text-slate-400">현재 안심 지수 86점 · 양호</p>
+          </div>
+          <div className="rounded-2xl border border-emerald-100 bg-white p-5 shadow-lg shadow-emerald-100/60">
+            <div className="flex items-center justify-between"><span className="text-xl">🔄</span><span className="text-[10px] font-black text-emerald-600">FAMILY SYNC</span></div>
+            <p className="mt-3 text-sm font-black text-slate-800">보호자에게 안심 전달</p>
+            <div className="mt-3 flex -space-x-2"><span className="flex h-7 w-7 items-center justify-center rounded-full border-2 border-white bg-blue-100 text-xs">👨🏻</span><span className="flex h-7 w-7 items-center justify-center rounded-full border-2 border-white bg-violet-100 text-xs">👩🏻</span><span className="ml-3 text-xs font-bold text-slate-400">가족 2명 연결</span></div>
+          </div>
+        </div>
+
+        <div className="relative mt-5 flex items-center justify-center gap-2 text-xs font-bold text-slate-400"><span className="h-2 w-2 animate-pulse rounded-full bg-blue-500" />도담이 오늘의 이야기를 돌봄으로 연결하고 있어요</div>
+      </div>
     </div>
   )
 }
 
 function ServiceIntro() {
   return (
-    <section id="service" className="bg-white py-16">
+    <section id="service" className="scroll-mt-20 bg-white py-16">
       <div className="mx-auto grid max-w-7xl gap-7 px-5 sm:px-8 lg:grid-cols-2">
         <div className="rounded-[2rem] bg-blue-50 p-8 sm:p-12">
           <p className="text-lg font-bold text-blue-700">
-            스마트 돌봄 서비스의 새로운 기준
+            피보호인과 보호자를 잇는 AI 돌봄
           </p>
           <h2 className="mt-3 text-4xl font-black leading-tight text-slate-950">
-            <span className="text-blue-600">안심지키미</span> 서비스란?
+            <span className="text-blue-600">담소</span> 서비스란?
           </h2>
           <p className="mt-7 text-xl leading-9 text-slate-700">
-            독거 노인 및 1인 가구의 생활 안전과 돌봄을 위해 IoT 기술과 AI
-            분석을 결합한 스마트 돌봄 서비스입니다. 위급 상황 감지부터 일상
-            기록, AI 대화까지 따뜻한 일상을 지원합니다.
+            담소는 AI 파트너 도담과 나눈 채팅과 음성 대화를 자동으로 기록하고,
+            생활 속 건강 신호를 분석해 리포트로 정리합니다. 필요한 순간에는
+            병원 진료 예약과 맞춤형 건강 케어를 연결하고, 모든 과정을 보호자와
+            안전하게 동기화합니다.
           </p>
 
           <div className="mt-10 flex items-center gap-5">
-            <div className="flex h-24 w-24 items-center justify-center rounded-[2rem] bg-blue-600 text-5xl text-white">
-              ♡
-            </div>
+            <img src="/logo.svg" alt="담소" className="h-24 w-24 rounded-[2rem] shadow-lg" />
             <div>
               <p className="text-lg font-bold text-blue-700">
-                사랑하는 사람도, 돌보는 당신도 안심됩니다
+                피보호인은 편안하게, 보호자는 든든하게
               </p>
-              <p className="text-2xl font-black text-slate-900">안심지키미</p>
+              <p className="text-2xl font-black text-slate-900">담소</p>
             </div>
           </div>
         </div>
 
         <div className="grid gap-5 sm:grid-cols-2">
-          <ServiceCard icon="🎙️" title="음성 기록" text="키보드 없이 말로 기록" />
-          <ServiceCard icon="📘" title="데일리 노트" text="하루 일상을 자동 정리" />
-          <ServiceCard icon="🤖" title="AI 대화" text="외로움을 덜어주는 대화" />
-          <ServiceCard icon="📈" title="건강 리포트" text="일상 패턴 변화 확인" />
+          <ServiceCard icon="🌼" title="AI 파트너 도담" text="음성과 문자로 언제든 편안하게 대화" />
+          <ServiceCard icon="📘" title="생활 자동 기록" text="대화를 데일리노트와 일정으로 자동 정리" />
+          <ServiceCard icon="📈" title="건강 리포트" text="생활 기록 속 건강 변화와 이상 신호 분석" />
+          <ServiceCard icon="👨‍👩‍👧" title="보호자 동기화" text="멀리 있는 가족에게 필요한 소식만 전달" />
         </div>
       </div>
     </section>
@@ -193,39 +213,46 @@ function CareProcess() {
   const items = [
     {
       num: '01',
-      title: '24시간 데이터 수집 및 분석',
-      text: '생활 데이터를 실시간으로 확인하여 이상 징후를 빠르게 감지합니다.',
-      emoji: '👵',
+      title: '도담과 편안한 대화',
+      text: '피보호인이 음성이나 문자로 일상과 몸 상태를 자연스럽게 이야기합니다.',
+      emoji: '🌼',
     },
     {
       num: '02',
-      title: 'AI 이상 징후 조기 감지',
-      text: '평소와 다른 움직임이나 생활 패턴을 AI가 분석합니다.',
-      emoji: '📡',
+      title: '채팅·음성 자동 기록',
+      text: '대화 내용을 데일리노트, 일정과 건강 기록으로 자동 정리합니다.',
+      emoji: '🎙️',
     },
     {
       num: '03',
-      title: '현지 기반 긴급 출동 대응',
-      text: '필요 시 가까운 기관과 연계하여 빠른 도움을 지원합니다.',
-      emoji: '🚑',
+      title: '건강 리포트 분석',
+      text: '누적 기록을 살펴 평소와 다른 건강 변화와 관리 신호를 찾아냅니다.',
+      emoji: '📊',
     },
     {
       num: '04',
-      title: '원 클릭 AI 실연',
-      text: '복잡한 조작 없이 AI와 대화하고 정서적 위로를 받을 수 있습니다.',
-      emoji: '👴',
+      title: '진료 예약·맞춤 케어',
+      text: '필요한 병원과 전문가를 안내하고 진료 예약과 생활 관리 방법을 제안합니다.',
+      emoji: '🏥',
+    },
+    {
+      num: '05',
+      title: '보호자 자동 동기화',
+      text: '중요 기록과 건강 알림을 보호자에게 전달해 멀리서도 함께 돌볼 수 있습니다.',
+      emoji: '🔄',
     },
   ]
 
   return (
-    <section id="care" className="bg-white py-14">
+    <section id="care" className="scroll-mt-20 bg-white py-14">
       <div className="mx-auto max-w-7xl px-5 sm:px-8">
         <div className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm sm:p-10">
           <h2 className="text-3xl font-black text-slate-950">
-            안심지키미가 함께합니다
+            이야기에서 돌봄까지, 하나로 이어집니다
           </h2>
+          <p className="mt-3 text-lg text-slate-500">도담과 나눈 평범한 대화가 필요한 건강 관리와 가족의 안심으로 연결됩니다.</p>
 
-          <div className="mt-8 grid gap-5 md:grid-cols-2 xl:grid-cols-4">
+          <div className="mt-8 grid gap-5 md:grid-cols-2 xl:grid-cols-5">
             {items.map((item) => (
               <div key={item.num} className="rounded-[2rem] bg-slate-50 p-6">
                 <div className="flex items-center gap-4">
@@ -234,7 +261,7 @@ function CareProcess() {
                   </span>
                   <span className="text-5xl">{item.emoji}</span>
                 </div>
-                <h3 className="mt-5 text-2xl font-black leading-snug text-blue-700">
+                <h3 className="mt-5 text-xl font-black leading-snug text-blue-700">
                   {item.title}
                 </h3>
                 <p className="mt-4 text-lg leading-8 text-slate-700">{item.text}</p>
@@ -252,20 +279,21 @@ function StorySection() {
     <section className="bg-white py-12">
       <div className="mx-auto max-w-7xl px-5 sm:px-8">
         <h2 className="text-center text-3xl font-black text-slate-950">
-          안심지키미를 경험한 고객의 이야기
+          피보호인도 보호자도 한결 가벼워졌어요
         </h2>
+        <p className="mt-3 text-center text-lg text-slate-500">일상의 연결이 돌봄 부담을 덜어낸 실제 사용 경험입니다.</p>
 
         <div className="mt-8 grid gap-6 lg:grid-cols-2">
           <StoryCard
-            image="🏡"
-            title="고독사 예방 스마트 돌봄 시스템"
-            text="혼자 사시는 어머니가 안심지키미로 더 안전하게 생활하고 있어요. 이상 상황을 빠르게 확인할 수 있어 보호자 입장에서도 안심됩니다."
-            name="이용자 김영희님"
+            image="👵🏻"
+            title="대화만 했는데 하루가 기록돼요"
+            text="도담에게 오늘 있었던 일과 몸 상태를 말하면 데일리노트와 건강 기록이 만들어져요. 복잡하게 입력하지 않아도 되어 매일 편하게 사용합니다."
+            name="피보호인 김영희님"
           />
           <StoryCard
-            image="🤖"
-            title="AI에서지킴이"
-            text="언제나 곁에 있는 느낌이라 편안합니다. 가족과 일상을 공유할 수 있어 외로움이 많이 줄었습니다."
+            image="👨‍👩‍👧"
+            title="멀리 있어도 필요한 순간을 알아요"
+            text="매번 전화로 확인하지 않아도 어머니의 일정과 건강 리포트를 볼 수 있어요. 검진 알림과 병원 예약까지 이어져 돌봄 부담이 많이 줄었습니다."
             name="보호자 이민수님"
           />
         </div>
@@ -304,32 +332,23 @@ function ProductSection() {
     <section className="bg-gradient-to-br from-blue-950 to-blue-600 py-16 text-white">
       <div className="mx-auto grid max-w-7xl items-center gap-10 px-5 sm:px-8 lg:grid-cols-2">
         <div>
-          <p className="text-xl font-bold text-blue-100">
-            국내 최고의 AI 기반 스마트 돌봄 서비스
-          </p>
-          <h2 className="mt-5 text-5xl font-black leading-tight">
-            “안심지키미”
-          </h2>
+          <p className="text-xl font-bold text-blue-100">보호자를 위한 안심 동기화</p>
+          <h2 className="mt-5 text-4xl font-black leading-tight sm:text-5xl">곁에 있지 않아도<br />오늘을 함께 봅니다</h2>
           <p className="mt-6 text-xl leading-9 text-blue-50">
-            사랑하는 사람을 위한 가장 쉬운 선택. 작은 기기 하나로 일상
-            모니터링, 이상 감지, AI 대화 서비스를 제공합니다.
+            피보호인의 동의를 바탕으로 데일리노트, 건강 리포트, 병원 예약과
+            치료 일정을 보호자 계정에 자동으로 동기화합니다. 매번 묻고 확인하는
+            부담은 줄이고, 도움이 필요한 순간에는 더 빠르게 함께할 수 있습니다.
           </p>
+          <div className="mt-8 flex flex-wrap gap-3"><span className="rounded-full bg-white/10 px-4 py-2 text-sm font-black">개인정보 보호</span><span className="rounded-full bg-white/10 px-4 py-2 text-sm font-black">피보호인 동의 기반</span><span className="rounded-full bg-white/10 px-4 py-2 text-sm font-black">필요한 정보만 공유</span></div>
         </div>
 
-        <div className="grid gap-6 md:grid-cols-[1fr_1.2fr]">
-          <div className="flex items-center justify-center">
-            <div className="relative h-44 w-64 rounded-[2rem] bg-slate-950 shadow-2xl">
-              <div className="absolute -top-32 right-16 h-36 w-5 rounded-full bg-slate-900" />
-              <div className="absolute left-1/2 top-1/2 h-12 w-12 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white" />
-              <div className="absolute bottom-6 left-7 h-2 w-20 rounded-full bg-slate-700" />
-            </div>
-          </div>
-
-          <div className="space-y-5">
-            <ProductFeature title="온도 & 습도 센서" />
-            <ProductFeature title="조도, 움직임, 리모컨 센서" />
-            <ProductFeature title="고성능 LTE 무선통신" />
-            <ProductFeature title="저전력 운영 & 배터리 백업" />
+        <div className="rounded-[2rem] bg-white p-5 text-slate-900 shadow-2xl sm:p-6">
+          <div className="flex items-center justify-between border-b border-slate-100 pb-4"><div className="flex items-center gap-3"><span className="flex h-11 w-11 items-center justify-center rounded-full bg-blue-100 text-2xl">👵🏻</span><div><b className="block">김순자 님</b><span className="text-xs font-bold text-emerald-600">● 안전하게 연결됨</span></div></div><span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-black text-blue-700">보호자 화면</span></div>
+          <div className="mt-5 space-y-3">
+            <ProductFeature icon="📘" title="오늘의 데일리노트" text="공원 산책과 친구를 만난 이야기가 기록됐어요." />
+            <ProductFeature icon="❤️" title="건강 리포트" text="안심 지수 86점 · 전반적으로 안정적이에요." />
+            <ProductFeature icon="🏥" title="진료 일정" text="7월 3일 오후 3:30 · 늘봄내과 정기 검진" />
+            <ProductFeature icon="🔔" title="맞춤형 케어 알림" text="정기 검진 시기가 되어 예약을 도와드렸어요." />
           </div>
         </div>
       </div>
@@ -337,13 +356,11 @@ function ProductSection() {
   )
 }
 
-function ProductFeature({ title }: { title: string }) {
+function ProductFeature({ icon, title, text }: { icon: string; title: string; text: string }) {
   return (
-    <div className="rounded-2xl bg-white/10 p-5 backdrop-blur">
-      <h3 className="text-xl font-black">{title}</h3>
-      <p className="mt-2 text-base leading-7 text-blue-50">
-        일상 데이터를 안정적으로 수집하고 보호자에게 필요한 정보를 전달합니다.
-      </p>
+    <div className="flex gap-3 rounded-2xl bg-slate-50 p-4">
+      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white text-xl shadow-sm">{icon}</span>
+      <div><h3 className="font-black">{title}</h3><p className="mt-1 text-sm leading-6 text-slate-500">{text}</p></div>
     </div>
   )
 }
@@ -351,35 +368,35 @@ function ProductFeature({ title }: { title: string }) {
 function GuideSection() {
   const guides = [
     {
-      title: '주로 생활하시는 공간에 설치해 주세요.',
-      text: '거실이나 주방처럼 자주 머무는 공간에 설치하면 안정적으로 작동합니다.',
-      icon: '🛋️',
+      title: '도담에게 편하게 이야기해요',
+      text: '버튼을 누르고 말하거나 문자로 오늘의 일상과 몸 상태를 들려주세요.',
+      icon: '🌼',
     },
     {
-      title: '센서 앞을 막는 장애물이 없어야 합니다.',
-      text: '센서 방향 앞에는 큰 물건을 두지 않는 것이 좋습니다.',
-      icon: '⚠️',
+      title: '기록은 자동으로 완성돼요',
+      text: '채팅과 음성 대화가 데일리노트, 건강 기록과 일정으로 정리됩니다.',
+      icon: '📘',
     },
     {
-      title: 'TV의 전자 제품을 가급적 피해 주세요.',
-      text: '전자제품과 너무 가까우면 감지 성능이 떨어질 수 있습니다.',
-      icon: '📺',
+      title: '건강 변화를 확인해요',
+      text: 'AI가 누적 기록을 분석해 건강 리포트와 필요한 관리 방법을 알려드려요.',
+      icon: '📊',
     },
     {
-      title: '항상 전원을 연결해 주세요.',
-      text: '안정적인 돌봄을 위해 전원 연결 상태를 유지해 주세요.',
-      icon: '🔌',
+      title: '진료와 가족 돌봄으로 이어져요',
+      text: '필요하면 병원 예약을 돕고 중요한 소식을 연결된 보호자에게 전달합니다.',
+      icon: '🤝',
     },
   ]
 
   return (
-    <section id="guide" className="bg-blue-50 py-16">
+    <section id="guide" className="scroll-mt-20 bg-blue-50 py-16">
       <div className="mx-auto max-w-7xl px-5 sm:px-8">
         <h2 className="text-center text-4xl font-black text-slate-950">
-          올바른 안심지키미 사용 방법
+          복잡한 입력 없이, 대화만 시작하세요
         </h2>
         <p className="mt-4 text-center text-xl text-slate-600">
-          어르신도 쉽게 이해할 수 있도록 간단하고 명확하게 안내합니다.
+          피보호인의 편안한 대화가 기록과 건강 관리, 가족의 안심으로 이어집니다.
         </p>
 
         <div className="mt-10 grid gap-6 md:grid-cols-2 xl:grid-cols-4">
@@ -406,49 +423,44 @@ function GuideSection() {
 }
 
 function AiServiceSection() {
-  const services = [
+  const principles = [
     {
-      icon: '🤖',
-      title: 'AI 채팅 파트너',
-      text: '외로운 순간에도 편하게 대화할 수 있는 AI 친구입니다.',
+      number: '01',
+      title: '쉬운 말로, 서두르지 않게',
+      text: '도담은 피보호인의 말하는 속도와 표현에 맞춰 묻고, 이해하기 어려운 내용은 다시 차분히 설명합니다.',
     },
     {
-      icon: '📘',
-      title: 'AI 데일리 노트',
-      text: '말로 남긴 하루를 자동으로 정리해 줍니다.',
+      number: '02',
+      title: '필요한 정보만 안전하게',
+      text: '대화와 건강 기록은 서비스 제공에 필요한 범위에서만 사용하며, 피보호인의 동의에 따라 공유 범위를 정합니다.',
     },
     {
-      icon: '📖',
-      title: '자동 자서전 생성',
-      text: '데일리 노트를 바탕으로 인생 이야기를 책처럼 만듭니다.',
+      number: '03',
+      title: '의료진의 판단을 대신하지 않게',
+      text: '건강 리포트는 생활 관리를 위한 참고 정보로 제공하고, 진단이 필요한 신호는 병원과 전문가에게 연결합니다.',
     },
     {
-      icon: '💙',
-      title: '건강 리포트',
-      text: '일상 변화와 건강 패턴을 보기 쉽게 알려줍니다.',
+      number: '04',
+      title: '보호자에게 꼭 필요한 순간만',
+      text: '모든 대화를 그대로 전달하지 않고, 동의된 일상 요약과 중요한 건강 변화만 보호자에게 알려드립니다.',
     },
   ]
 
   return (
-    <section id="ai" className="bg-white py-16">
-      <div className="mx-auto max-w-7xl px-5 sm:px-8">
-        <h2 className="text-center text-4xl font-black text-slate-950">
-          AI가 더 따뜻한 돌봄을 만듭니다
-        </h2>
+    <section id="ai" className="scroll-mt-20 bg-[#f5f8fc] py-20">
+      <div className="mx-auto grid max-w-7xl gap-10 px-5 sm:px-8 lg:grid-cols-[0.8fr_1.2fr] lg:gap-16">
+        <div className="lg:py-6">
+          <p className="text-sm font-black tracking-[0.16em] text-blue-600">DODAM AI PRINCIPLES</p>
+          <h2 className="mt-4 text-4xl font-black leading-tight text-slate-950 sm:text-5xl">잘 듣는 AI보다,<br /><span className="text-blue-600">조심스럽게 돌보는 AI</span></h2>
+          <p className="mt-6 text-lg leading-8 text-slate-600">도담은 많은 기능을 보여주는 것보다 피보호인이 안심하고 이야기할 수 있는 관계와 원칙을 먼저 생각합니다.</p>
+          <div className="mt-8 rounded-2xl border border-blue-100 bg-white p-5"><p className="text-sm font-black text-slate-800">담소의 약속</p><p className="mt-2 text-sm leading-6 text-slate-500">AI의 분석은 사람의 돌봄을 돕기 위한 도구이며, 중요한 결정은 피보호인·보호자·전문가가 함께 내립니다.</p></div>
+        </div>
 
-        <div className="mt-10 grid gap-6 md:grid-cols-2 xl:grid-cols-4">
-          {services.map((service) => (
-            <div
-              key={service.title}
-              className="rounded-[2rem] border border-slate-200 bg-white p-8 shadow-sm"
-            >
-              <div className="text-5xl">{service.icon}</div>
-              <h3 className="mt-6 text-2xl font-black text-slate-950">
-                {service.title}
-              </h3>
-              <p className="mt-4 text-lg leading-8 text-slate-700">
-                {service.text}
-              </p>
+        <div className="divide-y divide-slate-200 border-y border-slate-200">
+          {principles.map((principle) => (
+            <div key={principle.number} className="grid gap-3 py-7 sm:grid-cols-[64px_1fr] sm:py-8">
+              <span className="text-sm font-black text-blue-600">{principle.number}</span>
+              <div><h3 className="text-xl font-black text-slate-900">{principle.title}</h3><p className="mt-3 text-base leading-7 text-slate-600">{principle.text}</p></div>
             </div>
           ))}
         </div>
@@ -463,18 +475,14 @@ function Footer() {
       <div className="mx-auto flex max-w-7xl flex-col gap-8 px-5 sm:px-8 md:flex-row md:items-center md:justify-between">
         <div>
           <div className="flex items-center gap-3">
-            <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-blue-600 text-2xl">
-              ♡
-            </div>
-            <span className="text-2xl font-black">안심지키미</span>
+            <img src="/logo.svg" alt="담소" className="h-11 w-11 rounded-2xl" />
+            <span className="text-2xl font-black">담소</span>
           </div>
           <p className="mt-5 text-base leading-7 text-slate-300">
-            이용약관 · 개인정보처리방침 · 고객센터
-            <br />
-            대표번호 010.3422.5807 · help@ansim.co.kr
-            <br />
-            Copyright © 2026 안심지키미. All rights reserved.
+            AI 파트너 도담으로 피보호인의 일상과 가족의 안심을 연결합니다.
           </p>
+          <div className="mt-3 flex flex-wrap gap-2 text-sm font-bold text-slate-300"><span>이용약관</span><span>·</span><Link to="/support">개인정보 처리방침</Link><span>·</span><Link to="/support">고객센터</Link></div>
+          <p className="mt-3 text-sm leading-6 text-slate-400">대표번호 0000-0000 · help@damso.co.kr<br />Copyright © 2026 담소. All rights reserved.</p>
         </div>
 
         <div className="flex gap-4 text-3xl">
@@ -492,26 +500,26 @@ function MobileBottomNav() {
   return (
     <nav className="fixed bottom-0 left-0 right-0 z-50 border-t border-slate-200 bg-white md:hidden">
       <div className="grid h-20 grid-cols-5 text-center text-xs font-bold text-slate-600">
-        <a className="flex flex-col items-center justify-center gap-1 text-blue-600">
+        <a href="#" className="flex flex-col items-center justify-center gap-1 text-blue-600">
           <span className="text-2xl">🏠</span>
           홈
         </a>
-        <a className="flex flex-col items-center justify-center gap-1">
-          <span className="text-2xl">🎙️</span>
-          기록
+        <a href="#ai" className="flex flex-col items-center justify-center gap-1">
+          <span className="text-2xl">🛡️</span>
+          AI 원칙
         </a>
-        <a className="flex flex-col items-center justify-center gap-1">
-          <span className="text-2xl">🤖</span>
-          AI
-        </a>
-        <a className="flex flex-col items-center justify-center gap-1">
+        <a href="#care" className="flex flex-col items-center justify-center gap-1">
           <span className="text-2xl">❤️</span>
-          건강
+          돌봄
         </a>
-        <a className="flex flex-col items-center justify-center gap-1">
-          <span className="text-2xl">👤</span>
-          내 정보
+        <a href="#guide" className="flex flex-col items-center justify-center gap-1">
+          <span className="text-2xl">📖</span>
+          이용방법
         </a>
+        <Link to="/support" className="flex flex-col items-center justify-center gap-1">
+          <span className="text-2xl">☎️</span>
+          고객센터
+        </Link>
       </div>
     </nav>
   )
