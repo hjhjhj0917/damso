@@ -20,6 +20,7 @@ function Signup() {
   const [accountType, setAccountType] = useState<AccountType>('user')
   const [userId, setUserId] = useState('')
   const [password, setPassword] = useState('')
+  const [passwordConfirm, setPasswordConfirm] = useState('')
   const [name, setName] = useState('')
   const [phone, setPhone] = useState('')
   const [checkStatus, setCheckStatus] = useState<CheckStatus>('idle')
@@ -78,6 +79,10 @@ function Signup() {
     }
     if (password.length < 8) {
       setError('비밀번호는 8자 이상이어야 합니다.')
+      return
+    }
+    if (password !== passwordConfirm) {
+      setError('비밀번호가 일치하지 않습니다.')
       return
     }
     if (name.trim().length < 2) {
@@ -176,6 +181,10 @@ function Signup() {
             </div>
 
             <Field label="비밀번호"><input value={password} onChange={(event) => { setPassword(event.target.value); setError('') }} type="password" placeholder="8자 이상 입력하세요" className={AUTH_INPUT_CLASS} /></Field>
+            <Field label="비밀번호 확인">
+              <input value={passwordConfirm} onChange={(event) => { setPasswordConfirm(event.target.value); setError('') }} type="password" placeholder="비밀번호를 다시 입력하세요" className={AUTH_INPUT_CLASS} />
+              {passwordConfirm.length > 0 && password !== passwordConfirm && <Message error>비밀번호가 일치하지 않습니다.</Message>}
+            </Field>
             <Field label="이름"><input value={name} onChange={(event) => { setName(event.target.value); setError('') }} placeholder="이름을 입력하세요" className={AUTH_INPUT_CLASS} /></Field>
             <Field label="전화번호"><input value={phone} onChange={(event) => { setPhone(event.target.value.replace(/\D/g, '').slice(0, 11)); setError('') }} type="tel" inputMode="numeric" placeholder="01012345678" className={AUTH_INPUT_CLASS} /></Field>
 
