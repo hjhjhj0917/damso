@@ -13,6 +13,15 @@ export type DailyNote = {
   mood: string
   tags: string[]
   health: string
+  comments?: NoteComment[]
+}
+
+export type NoteComment = {
+  id: number
+  author: string
+  role: 'user' | 'guardian'
+  text: string
+  createdAt: string
 }
 
 export type BiographyChapter = {
@@ -28,7 +37,7 @@ export type ScheduleEvent = {
   date: string
   time: string
   title: string
-  type: 'hospital' | 'medication' | 'treatment' | 'daily'
+  type: 'hospital' | 'medication' | 'treatment' | 'daily' | 'personal'
   description: string
   location?: string
   status: '예정' | '완료'
@@ -42,6 +51,7 @@ export const navItems = [
   { id: 'biography', label: '나의 자서전', icon: '▥' },
   { id: 'health', label: '건강 리포트', icon: '♡' },
   { id: 'mypage', label: '마이페이지', icon: '●' },
+  { id: 'admin', label: '관리자', icon: '🛠' },
 ] as const
 
 export type ServiceTab = (typeof navItems)[number]['id']
@@ -225,4 +235,76 @@ export function todayKorean() {
   })
     .format(new Date())
     .replaceAll('. ', '. ')
+}
+
+/**
+ * 일정 시간 문자열을 24시간제 { hour, minute }로 변환합니다. 형식이 아니면 null.
+ * "오전 8:00" / "오후 3:30" 같은 한국어 표기와, <input type="time">이 저장하는
+ * "14:05" 같은 24시간제 표기를 모두 지원합니다.
+ */
+export function parseKoreanTime(time: string): { hour: number; minute: number } | null {
+  const koreanMatch = time.match(/(오전|오후)\s*(\d{1,2}):(\d{2})/)
+  if (koreanMatch) {
+    const [, period, hourText, minuteText] = koreanMatch
+    let hour = Number(hourText) % 12
+    if (period === '오후') hour += 12
+    return { hour, minute: Number(minuteText) }
+  }
+  const plainMatch = time.match(/^(\d{1,2}):(\d{2})$/)
+  if (plainMatch) {
+    const [, hourText, minuteText] = plainMatch
+    const hour = Number(hourText)
+    const minute = Number(minuteText)
+    if (hour > 23 || minute > 59) return null
+    return { hour, minute }
+  }
+  return null
+}
+
+/** <input type="time">의 "14:05" 같은 24시간제 값을 "오후 2:05" 형태로 바꿉니다. */
+export function toKoreanTimeLabel(time24: string): string {
+  const match = time24.match(/^(\d{1,2}):(\d{2})$/)
+  if (!match) return time24
+  const hour24 = Number(match[1])
+  const minute = match[2]
+  const period = hour24 < 12 ? '오전' : '오후'
+  const hour12 = hour24 % 12 === 0 ? 12 : hour24 % 12
+  return `${period} ${hour12}:${minute}`
+}
+
+/** 일정 종류에 맞는 알림 문구를 만듭니다. */
+export function scheduleReminderMessage(schedule: ScheduleEvent) {
+  switch (schedule.type) {
+    case 'medication':
+      return `지금 '${schedule.title}' 시간이에요. 복약을 잊지 마세요!`
+    case 'hospital':
+      return `'${schedule.title}' 시간이 다가와요. 준비해 주세요.`
+    case 'treatment':
+      return `'${schedule.title}' 시간이에요.`
+    case 'daily':
+      return `'${schedule.title}' 시간이에요. 오늘 이야기를 들려주세요.`
+    default:
+      return `'${schedule.title}' 일정이 있어요.`
+  }
+}
+
+/**
+ * 오늘 날짜(YYYY-MM-DD, 로컬 기준)의 '예정' 상태 일정 중 지금 시각에 도달했고
+ * 아직 알리지 않은 항목을 찾습니다. alreadyNotifiedIds는 스팸 방지를 위한 집합입니다.
+ */
+export function findDueSchedules(
+  schedules: ScheduleEvent[],
+  alreadyNotifiedIds: ReadonlySet<number>,
+  now: Date = new Date(),
+): ScheduleEvent[] {
+  const todayISO = now.toLocaleDateString('sv-SE')
+  const nowMinutes = now.getHours() * 60 + now.getMinutes()
+  return schedules.filter((schedule) => {
+    if (schedule.status !== '예정') return false
+    if (schedule.date !== todayISO) return false
+    if (alreadyNotifiedIds.has(schedule.id)) return false
+    const parsed = parseKoreanTime(schedule.time)
+    if (!parsed) return false
+    return nowMinutes >= parsed.hour * 60 + parsed.minute
+  })
 }

@@ -1,46 +1,57 @@
-import { type FormEvent, useEffect, useState } from 'react'
-import { Link, useLocation, useNavigate } from 'react-router-dom'
-import { FindIdView } from './FindIdView'
-import { FindPasswordView } from './FindPasswordView'
-import { normalizeId, type SavedUser } from './authShared'
+import { type FormEvent, useEffect, useState } from "react";
+import { Link, useLocation, useNavigate } from "react-router-dom";
+import { FindIdView } from "./FindIdView";
+import { FindPasswordView } from "./FindPasswordView";
+import {
+  AUTH_INPUT_CLASS,
+  getSavedUsers,
+  isMasterCredential,
+  normalizeId,
+} from "./authShared";
 
-type LoginModalMode = 'login' | 'findId' | 'findPassword'
+type LoginModalMode = "login" | "findId" | "findPassword";
 
 function Header() {
-  const [isLoginOpen, setIsLoginOpen] = useState(false)
-  const location = useLocation()
-  const navigate = useNavigate()
+  const [isLoginOpen, setIsLoginOpen] = useState(false);
+  const location = useLocation();
+  const navigate = useNavigate();
 
   useEffect(() => {
-    const searchParams = new URLSearchParams(location.search)
-    const shouldOpenLogin = searchParams.get('login')
-    if (shouldOpenLogin === 'true') setIsLoginOpen(true)
+    const searchParams = new URLSearchParams(location.search);
+    const shouldOpenLogin = searchParams.get("login");
+    // URL의 ?login=true 쿼리와 모달 표시 상태를 동기화합니다.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (shouldOpenLogin === "true") setIsLoginOpen(true);
 
-    const hasAutoLogin = localStorage.getItem('ansimAutoLogin') === 'true'
-    const hasSession = localStorage.getItem('ansimSession') !== null
+    const hasAutoLogin = localStorage.getItem("ansimAutoLogin") === "true";
+    const hasSession = localStorage.getItem("ansimSession") !== null;
     if (
       hasAutoLogin &&
       hasSession &&
-      location.pathname === '/' &&
-      shouldOpenLogin !== 'true'
+      location.pathname === "/" &&
+      shouldOpenLogin !== "true"
     ) {
-      navigate('/dashboard', { replace: true })
+      navigate("/dashboard", { replace: true });
     }
-  }, [location.pathname, location.search, navigate])
+  }, [location.pathname, location.search, navigate]);
 
   const closeLogin = () => {
-    setIsLoginOpen(false)
-    navigate('/', { replace: true })
-  }
+    setIsLoginOpen(false);
+    navigate("/", { replace: true });
+  };
 
-  if (location.pathname.startsWith('/dashboard')) return null
+  if (location.pathname.startsWith("/dashboard")) return null;
 
   return (
     <>
       <header className="sticky top-0 z-50 border-b border-slate-200 bg-white/90 backdrop-blur-md">
         <div className="mx-auto flex h-20 max-w-7xl items-center justify-between px-5 sm:px-8">
           <Link to="/" className="flex items-center gap-3">
-            <img src="/logo.svg" alt="담소" className="h-11 w-11 rounded-2xl shadow-md" />
+            <img
+              src="/logo.svg"
+              alt="담소"
+              className="h-11 w-11 rounded-2xl shadow-md"
+            />
             <span className="text-2xl font-extrabold tracking-tight text-slate-900">
               담소
             </span>
@@ -85,81 +96,92 @@ function Header() {
 
       {isLoginOpen && <LoginModal onClose={closeLogin} />}
     </>
-  )
+  );
 }
 
 function LoginModal({ onClose }: { onClose: () => void }) {
-  const navigate = useNavigate()
+  const navigate = useNavigate();
 
-  const [mode, setMode] = useState<LoginModalMode>('login')
+  const [mode, setMode] = useState<LoginModalMode>("login");
 
-  const [userId, setUserId] = useState('')
-  const [password, setPassword] = useState('')
-  const [autoLogin, setAutoLogin] = useState(false)
-  const [loginError, setLoginError] = useState(false)
-
-  const getSavedUsers = (): SavedUser[] => {
-    const savedUsers = localStorage.getItem('ansimUsers')
-    return savedUsers ? (JSON.parse(savedUsers) as SavedUser[]) : []
-  }
+  const [userId, setUserId] = useState("");
+  const [password, setPassword] = useState("");
+  const [autoLogin, setAutoLogin] = useState(false);
+  const [loginError, setLoginError] = useState(false);
 
   const handleLogin = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault()
+    event.preventDefault();
 
-    const users = getSavedUsers()
+    const users = getSavedUsers();
 
-    const normalizedInputId = normalizeId(userId)
+    const normalizedInputId = normalizeId(userId);
 
-    const isDemoUser = userId === 'demo' && password === '1234'
-    const isGuardianDemoUser = userId === 'guardian' && password === '1234'
+    const isMasterUser = isMasterCredential(userId, password);
+    const isDemoUser =
+      userId === "demo" &&
+      password === (localStorage.getItem("ansimDemoPassword") ?? "1234");
+    const isGuardianDemoUser =
+      userId === "guardian" &&
+      password ===
+        (localStorage.getItem("ansimGuardianDemoPassword") ?? "1234");
 
     const isSignupUser = users.some((user) => {
-      return normalizeId(user.id) === normalizedInputId && user.password === password
-    })
+      return (
+        normalizeId(user.id) === normalizedInputId && user.password === password
+      );
+    });
 
-    if (isDemoUser || isGuardianDemoUser || isSignupUser) {
+    if (isMasterUser || isDemoUser || isGuardianDemoUser || isSignupUser) {
       const matchedUser = users.find(
         (user) => normalizeId(user.id) === normalizedInputId,
-      )
+      );
+      const masterSession = {
+        id: "master",
+        name: "마스터 관리자",
+        phone: "",
+        accountType: "admin" as const,
+      };
       const demoGuardianSession = {
-        id: 'guardian',
-        name: '김민수',
-        phone: '01098765432',
-        accountType: 'guardian' as const,
-        parentName: '김순자',
-        parentPhone: '01012345678',
-        parentRelation: '자녀',
-      }
-      localStorage.setItem(
-        'ansimSession',
-        JSON.stringify(isGuardianDemoUser ? demoGuardianSession : {
-          id: matchedUser?.id ?? 'demo',
-          name: matchedUser?.name ?? '김순자',
-          phone: matchedUser?.phone ?? '01012345678',
-          accountType: matchedUser?.accountType ?? 'user',
-          parentName: matchedUser?.parent?.name,
-          parentPhone: matchedUser?.parent?.phone,
-          parentRelation: matchedUser?.parent?.relation,
-        }),
-      )
+        id: "guardian",
+        name: "김민수",
+        phone: "01098765432",
+        accountType: "guardian" as const,
+        parentName: "김순자",
+        parentPhone: "01012345678",
+        parentRelation: "자녀",
+      };
+      const session = isMasterUser
+        ? masterSession
+        : isGuardianDemoUser
+          ? demoGuardianSession
+          : {
+              id: matchedUser?.id ?? "demo",
+              name: matchedUser?.name ?? "김순자",
+              phone: matchedUser?.phone ?? "01012345678",
+              accountType: matchedUser?.accountType ?? "user",
+              parentName: matchedUser?.parent?.name,
+              parentPhone: matchedUser?.parent?.phone,
+              parentRelation: matchedUser?.parent?.relation,
+            };
+      localStorage.setItem("ansimSession", JSON.stringify(session));
       if (autoLogin) {
-        localStorage.setItem('ansimAutoLogin', 'true')
+        localStorage.setItem("ansimAutoLogin", "true");
       } else {
-        localStorage.removeItem('ansimAutoLogin')
+        localStorage.removeItem("ansimAutoLogin");
       }
-      setLoginError(false)
-      onClose()
-      navigate('/dashboard')
-      return
+      setLoginError(false);
+      onClose();
+      navigate("/dashboard");
+      return;
     }
 
-    setLoginError(true)
-  }
+    setLoginError(true);
+  };
 
   return (
     <div
       onMouseDown={(event) => {
-        if (event.target === event.currentTarget) onClose()
+        if (event.target === event.currentTarget) onClose();
       }}
       className="fixed inset-0 z-[100] flex items-center justify-center overflow-y-auto bg-slate-950/60 px-5 py-8 backdrop-blur-sm"
     >
@@ -172,7 +194,7 @@ function LoginModal({ onClose }: { onClose: () => void }) {
           ×
         </button>
 
-        {mode === 'login' && (
+        {mode === "login" && (
           <LoginView
             userId={userId}
             password={password}
@@ -183,33 +205,25 @@ function LoginModal({ onClose }: { onClose: () => void }) {
             setAutoLogin={setAutoLogin}
             handleLogin={handleLogin}
             onFindId={() => {
-              setLoginError(false)
-              setMode('findId')
+              setLoginError(false);
+              setMode("findId");
             }}
             onFindPassword={() => {
-              setLoginError(false)
-              setMode('findPassword')
+              setLoginError(false);
+              setMode("findPassword");
             }}
             onClose={onClose}
           />
         )}
 
-        {mode === 'findId' && (
-          <FindIdView
-            getSavedUsers={getSavedUsers}
-            onBack={() => setMode('login')}
-          />
-        )}
+        {mode === "findId" && <FindIdView onBack={() => setMode("login")} />}
 
-        {mode === 'findPassword' && (
-          <FindPasswordView
-            getSavedUsers={getSavedUsers}
-            onBack={() => setMode('login')}
-          />
+        {mode === "findPassword" && (
+          <FindPasswordView onBack={() => setMode("login")} />
         )}
       </div>
     </div>
-  )
+  );
 }
 
 function LoginView({
@@ -225,26 +239,26 @@ function LoginView({
   onFindPassword,
   onClose,
 }: {
-  userId: string
-  password: string
-  autoLogin: boolean
-  loginError: boolean
-  setUserId: (value: string) => void
-  setPassword: (value: string) => void
-  setAutoLogin: (value: boolean) => void
-  handleLogin: (event: FormEvent<HTMLFormElement>) => void
-  onFindId: () => void
-  onFindPassword: () => void
-  onClose: () => void
+  userId: string;
+  password: string;
+  autoLogin: boolean;
+  loginError: boolean;
+  setUserId: (value: string) => void;
+  setPassword: (value: string) => void;
+  setAutoLogin: (value: boolean) => void;
+  handleLogin: (event: FormEvent<HTMLFormElement>) => void;
+  onFindId: () => void;
+  onFindPassword: () => void;
+  onClose: () => void;
 }) {
-  const handleSocialLogin = (serviceName: string) => {
-    alert(`${serviceName} 연동 로그인은 시연용 버튼입니다.`)
-  }
-
   return (
     <>
       <div className="mb-8 text-center">
-        <img src="/logo.svg" alt="담소" className="mx-auto h-16 w-16 rounded-3xl shadow-lg" />
+        <img
+          src="/logo.svg"
+          alt="담소"
+          className="mx-auto h-16 w-16 rounded-3xl shadow-lg"
+        />
 
         <h2 className="mt-5 text-4xl font-black text-slate-950">로그인</h2>
 
@@ -266,7 +280,7 @@ function LoginView({
               onChange={(event) => setUserId(event.target.value)}
               type="text"
               placeholder="아이디를 입력하세요"
-              className="h-16 w-full rounded-2xl border-2 border-slate-200 bg-slate-50 px-5 text-xl font-semibold outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:bg-white"
+              className={AUTH_INPUT_CLASS}
             />
           </div>
 
@@ -279,7 +293,7 @@ function LoginView({
               onChange={(event) => setPassword(event.target.value)}
               type="password"
               placeholder="비밀번호를 입력하세요"
-              className="h-16 w-full rounded-2xl border-2 border-slate-200 bg-slate-50 px-5 text-xl font-semibold outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:bg-white"
+              className={AUTH_INPUT_CLASS}
             />
 
             {loginError && (
@@ -312,7 +326,11 @@ function LoginView({
       </form>
 
       <div className="mt-5 flex items-center justify-center gap-3 text-base font-bold text-slate-500">
-        <button type="button" onClick={onFindId} className="hover:text-blue-600">
+        <button
+          type="button"
+          onClick={onFindId}
+          className="hover:text-blue-600"
+        >
           아이디 찾기
         </button>
         <span>|</span>
@@ -321,41 +339,8 @@ function LoginView({
           onClick={onFindPassword}
           className="hover:text-blue-600"
         >
-          비밀번호 찾기
+          비밀번호 재설정
         </button>
-      </div>
-
-      <div className="my-7 flex items-center gap-4">
-        <div className="h-px flex-1 bg-slate-200" />
-        <span className="text-base font-bold text-slate-400">간편 로그인</span>
-        <div className="h-px flex-1 bg-slate-200" />
-      </div>
-
-      <div className="grid grid-cols-2 gap-3">
-        <SocialButton
-          label="구글"
-          icon="G"
-          className="border-slate-200 bg-white text-slate-800"
-          onClick={() => handleSocialLogin('구글')}
-        />
-        <SocialButton
-          label="카카오톡"
-          icon="💬"
-          className="border-yellow-300 bg-yellow-300 text-slate-900"
-          onClick={() => handleSocialLogin('카카오톡')}
-        />
-        <SocialButton
-          label="네이버"
-          icon="N"
-          className="border-green-500 bg-green-500 text-white"
-          onClick={() => handleSocialLogin('네이버')}
-        />
-        <SocialButton
-          label="페이스북"
-          icon="f"
-          className="border-blue-700 bg-blue-700 text-white"
-          onClick={() => handleSocialLogin('페이스북')}
-        />
       </div>
 
       <div className="mt-8 rounded-3xl bg-blue-50 p-5 text-center">
@@ -372,32 +357,7 @@ function LoginView({
         </Link>
       </div>
     </>
-  )
+  );
 }
 
-function SocialButton({
-  label,
-  icon,
-  className,
-  onClick,
-}: {
-  label: string
-  icon: string
-  className: string
-  onClick: () => void
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`flex h-14 items-center justify-center gap-3 rounded-2xl border-2 text-lg font-black shadow-sm transition hover:scale-[1.02] ${className}`}
-    >
-      <span className="flex h-8 w-8 items-center justify-center rounded-full bg-white/80 text-lg font-black text-slate-900">
-        {icon}
-      </span>
-      {label}
-    </button>
-  )
-}
-
-export default Header
+export default Header;

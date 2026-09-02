@@ -160,20 +160,22 @@ function ServiceIntro() {
             피보호인과 보호자를 잇는 AI 돌봄
           </p>
           <h2 className="mt-3 text-4xl font-black leading-tight text-slate-950">
-            <span className="text-blue-600">담소</span> 서비스란?
+            당신의 파트너 
+            <span className="text-blue-600"> 담소</span>
           </h2>
           <p className="mt-7 text-xl leading-9 text-slate-700">
-            담소는 AI 파트너 도담과 나눈 채팅과 음성 대화를 자동으로 기록하고,
-            생활 속 건강 신호를 분석해 리포트로 정리합니다. 필요한 순간에는
-            병원 진료 예약과 맞춤형 건강 케어를 연결하고, 모든 과정을 보호자와
-            안전하게 동기화합니다.
+            저희 담소에서는 인공지능 도담을 통해 채팅과 음성 대화를 자동으로 기록하고,
+            심리적인 안정을 제공하며 사용자의 일상을 기록해주며 사용자의 삶의 이야기를
+            E-Book으로 자동생성까지 도와드리는 서비스입니다. 부가적으로 건강리포트를
+            작성하고 필요한 순간에 사용자와 보호자에게 동기화하여 Health케어 서비스를 제공,
+            보호자와 사용자의 심리적 케어 부담을 줄이는 서비스 입니다. 
           </p>
 
           <div className="mt-10 flex items-center gap-5">
             <img src="/logo.svg" alt="담소" className="h-24 w-24 rounded-[2rem] shadow-lg" />
             <div>
               <p className="text-lg font-bold text-blue-700">
-                피보호인은 편안하게, 보호자는 든든하게
+                사용자를 편안하게, 보호자는 든든하게
               </p>
               <p className="text-2xl font-black text-slate-900">담소</p>
             </div>
@@ -231,8 +233,8 @@ function CareProcess() {
     },
     {
       num: '04',
-      title: '진료 예약·맞춤 케어',
-      text: '필요한 병원과 전문가를 안내하고 진료 예약과 생활 관리 방법을 제안합니다.',
+      title: '병원 전화 연결·맞춤 케어',
+      text: '필요한 병원과 전문가를 안내하고 바로 예약 전화를 걸 수 있도록 연결합니다.',
       emoji: '🏥',
     },
     {
@@ -293,7 +295,7 @@ function StorySection() {
           <StoryCard
             image="👨‍👩‍👧"
             title="멀리 있어도 필요한 순간을 알아요"
-            text="매번 전화로 확인하지 않아도 어머니의 일정과 건강 리포트를 볼 수 있어요. 검진 알림과 병원 예약까지 이어져 돌봄 부담이 많이 줄었습니다."
+            text="매번 전화로 확인하지 않아도 어머니의 일정과 건강 리포트를 볼 수 있어요. 검진 알림에서 병원으로 바로 전화할 수 있어 돌봄 부담이 많이 줄었습니다."
             name="보호자 이민수님"
           />
         </div>
@@ -384,7 +386,7 @@ function GuideSection() {
     },
     {
       title: '진료와 가족 돌봄으로 이어져요',
-      text: '필요하면 병원 예약을 돕고 중요한 소식을 연결된 보호자에게 전달합니다.',
+      text: '필요하면 병원 예약 전화로 연결하고 중요한 소식을 연결된 보호자에게 전달합니다.',
       icon: '🤝',
     },
   ]

@@ -1,7 +1,8 @@
-import { type FormEvent, type ReactNode, useEffect, useRef, useState } from 'react'
+import { type FormEvent, type ReactNode, useEffect, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { loadStored } from '../utils/appData'
 
-type SupportTab = 'faq' | 'privacy' | 'inquiry' | 'chatbot'
+type SupportTab = 'faq' | 'privacy' | 'inquiry'
 type InquiryStatus = '접수완료' | '답변중' | '답변완료'
 type Inquiry = {
   id: number
@@ -12,13 +13,11 @@ type Inquiry = {
   status: InquiryStatus
   answer?: string
 }
-type ChatMessage = { id: number; role: 'bot' | 'user'; text: string }
 
 const tabs: Array<{ id: SupportTab; label: string; icon: string; description: string }> = [
   { id: 'faq', label: '자주 묻는 질문', icon: '？', description: '빠르게 답을 찾아보세요' },
   { id: 'privacy', label: '개인정보 처리방침', icon: '▣', description: '정보 보호 기준을 확인하세요' },
   { id: 'inquiry', label: '1:1 문의', icon: '✉', description: '문의 접수와 답변 내역' },
-  { id: 'chatbot', label: '챗봇 문의', icon: '✦', description: '24시간 바로 물어보세요' },
 ]
 
 const faqs = [
@@ -36,8 +35,15 @@ const initialInquiries: Inquiry[] = [
   { id: 1001, category: '건강 리포트', title: '안심 지수는 어떻게 계산되나요?', content: '건강 리포트의 안심 지수 기준이 궁금합니다.', createdAt: '2026.06.29', status: '답변중' },
 ]
 
+const isSupportTab = (value: string | null): value is SupportTab =>
+  value === 'faq' || value === 'privacy' || value === 'inquiry'
+
 function Support() {
-  const [activeTab, setActiveTab] = useState<SupportTab>('faq')
+  const [searchParams] = useSearchParams()
+  const requestedTab = searchParams.get('tab')
+  const [activeTab, setActiveTab] = useState<SupportTab>(
+    isSupportTab(requestedTab) ? requestedTab : 'faq',
+  )
 
   return (
     <main className="min-h-screen bg-[#f5f7fb]">
@@ -67,7 +73,6 @@ function Support() {
           {activeTab === 'faq' && <FaqView onInquiry={() => setActiveTab('inquiry')} />}
           {activeTab === 'privacy' && <PrivacyView />}
           {activeTab === 'inquiry' && <InquiryView />}
-          {activeTab === 'chatbot' && <ChatbotView onInquiry={() => setActiveTab('inquiry')} />}
         </section>
       </div>
     </main>
@@ -91,14 +96,14 @@ function FaqView({ onInquiry }: { onInquiry: () => void }) {
   </div>
 }
 
-function PrivacyView() {
+export function PrivacyView() {
   return <article>
     <SectionTitle eyebrow="PRIVACY POLICY" title="개인정보 처리방침" description="담소는 개인정보 보호법 등 관계 법령에 따라 개인정보를 안전하게 처리합니다." />
     <div className="mb-6 rounded-2xl border border-amber-200 bg-amber-50 p-5 text-sm leading-6 text-amber-900"><b>시행 전 확인 안내</b><p className="mt-1">본 방침은 2026년 7월 2일 기준 서비스 설계를 반영한 초안입니다. 정식 출시 전 실제 법인정보, 수탁사, 서버 위치와 본인확인 방식을 확정한 후 개인정보 보호책임자 및 법률 전문가의 최종 검토를 거쳐야 합니다.</p></div>
     <div className="space-y-5">
       <PolicySection number="01" title="개인정보의 처리 목적"><p>담소는 회원가입 및 본인확인, AI 파트너 대화 제공, 데일리노트·자서전·건강 리포트 생성, 피보호인과 보호자 계정 연결, 건강 이상 신호 안내, 병원 예약 및 상담 연결, 고객 문의 처리와 서비스 안전성 개선을 위해 개인정보를 처리합니다. 목적이 변경될 경우 관계 법령에 따라 별도 동의를 받거나 필요한 조치를 합니다.</p></PolicySection>
       <PolicySection number="02" title="처리하는 개인정보 항목"><DataTable rows={[
-        ['회원가입·본인확인', '필수: 아이디, 비밀번호, 성명, 휴대전화번호, 통신사, 본인확인 결과(CI/DI 등). 시연 화면의 주민등록번호 입력값은 정식 서비스에서 본인확인기관을 통해 처리하고 회사가 원문을 저장하지 않는 방식으로 전환합니다.'],
+        ['회원가입·본인확인', '필수: 아이디, 비밀번호, 성명, 휴대전화번호, 이메일 및 이메일 인증 결과'],
         ['피보호인 연결', '피보호인 성명, 휴대전화번호, 보호자와의 관계, 계정 연결 동의 및 인증 결과'],
         ['AI 돌봄 서비스', '채팅·음성 기록, 데일리노트, 일정, 복약·수면·활동 및 이용자가 직접 제공한 건강 관련 정보'],
         ['병원 예약', '예약자 성명, 연락처, 예약 일시·의료기관, 예약에 필요한 최소 건강정보'],
@@ -160,27 +165,6 @@ function InquiryView() {
 function StatusBadge({ status }: { status: InquiryStatus }) {
   const colors: Record<InquiryStatus, string> = { 접수완료: 'bg-slate-100 text-slate-600', 답변중: 'bg-amber-100 text-amber-700', 답변완료: 'bg-emerald-100 text-emerald-700' }
   return <span className={`inline-flex w-fit shrink-0 rounded-full px-3 py-1.5 text-xs font-black ${colors[status]}`}>{status}</span>
-}
-
-function ChatbotView({ onInquiry }: { onInquiry: () => void }) {
-  const [messages, setMessages] = useState<ChatMessage[]>([{ id: 1, role: 'bot', text: '안녕하세요. 담소 고객센터 챗봇이에요. 서비스 이용, 계정 연결, 건강 리포트나 병원 예약에 대해 물어보세요.' }])
-  const [input, setInput] = useState('')
-  const bottomRef = useRef<HTMLDivElement>(null)
-  useEffect(() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' }), [messages])
-  const respond = (text: string) => {
-    if (text.includes('연동') || text.includes('연결')) return '보호자 계정의 마이페이지에서 ‘피보호인 계정 연동하기’를 선택한 뒤 피보호인 정보로 인증하면 연결할 수 있어요.'
-    if (text.includes('예약') || text.includes('병원')) return '건강 리포트의 병원 예약 버튼에서 가능한 시간을 선택할 수 있어요. 완료된 예약은 일정 캘린더에 자동으로 등록됩니다.'
-    if (text.includes('건강') || text.includes('리포트')) return '건강 리포트는 대화와 생활 기록을 바탕으로 만든 참고 정보예요. 증상이 있거나 이상 신호가 지속되면 의료진의 진료를 받아주세요.'
-    if (text.includes('탈퇴') || text.includes('개인정보')) return '개인정보 확인·수정·탈퇴는 마이페이지에서 할 수 있어요. 자세한 처리 기준은 고객센터의 개인정보 처리방침에서 확인할 수 있습니다.'
-    return '말씀하신 내용을 정확히 확인하려면 1:1 문의로 남겨주세요. 담당자가 내용을 살펴보고 답변해 드릴게요.'
-  }
-  const send = (text: string) => { if (!text.trim()) return; setMessages((value) => [...value, { id: Date.now(), role: 'user', text: text.trim() }]); setInput(''); window.setTimeout(() => setMessages((value) => [...value, { id: Date.now() + 1, role: 'bot', text: respond(text) }]), 350) }
-
-  return <div>
-    <SectionTitle eyebrow="CHATBOT" title="챗봇 문의" description="간단한 질문은 24시간 바로 답을 확인할 수 있어요." />
-    <div className="overflow-hidden rounded-[1.75rem] border border-slate-200 bg-white shadow-sm"><div className="flex items-center border-b border-slate-100 p-5"><span className="flex h-11 w-11 items-center justify-center rounded-full bg-blue-100 text-xl">✦</span><div className="ml-3"><b className="block">담소 상담봇</b><span className="text-xs font-bold text-emerald-600">● 상담 가능</span></div><button onClick={onInquiry} className="ml-auto rounded-xl bg-slate-100 px-3 py-2 text-xs font-black">1:1 문의 전환</button></div><div className="h-[430px] overflow-y-auto bg-slate-50 p-5">{messages.map((message) => <div key={message.id} className={`mb-4 flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}><div className={`max-w-[82%] rounded-2xl px-4 py-3 text-sm leading-6 ${message.role === 'user' ? 'rounded-br-md bg-blue-600 text-white' : 'rounded-bl-md border border-slate-100 bg-white text-slate-600 shadow-sm'}`}>{message.text}</div></div>)}<div ref={bottomRef} /></div><div className="border-t border-slate-100 p-4"><div className="mb-3 flex gap-2 overflow-x-auto">{['피보호인 연동 방법','병원 예약 확인','건강 리포트 안내','회원탈퇴 방법'].map((item) => <button key={item} onClick={() => send(item)} className="shrink-0 rounded-full bg-blue-50 px-3 py-2 text-xs font-black text-blue-700">{item}</button>)}</div><form onSubmit={(event) => { event.preventDefault(); send(input) }} className="flex gap-2"><input value={input} onChange={(event) => setInput(event.target.value)} placeholder="궁금한 내용을 입력하세요" className="h-13 min-w-0 flex-1 rounded-xl border-2 border-slate-200 px-4 outline-none focus:border-blue-500" /><button className="rounded-xl bg-blue-600 px-5 font-black text-white">전송</button></form></div></div>
-    <p className="mt-4 text-center text-xs text-slate-400">챗봇 답변은 일반적인 안내이며 의료·법률 상담을 대신하지 않습니다.</p>
-  </div>
 }
 
 function SupportModal({ children, onClose }: { children: ReactNode; onClose: () => void }) {

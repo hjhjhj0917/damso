@@ -1,8 +1,6 @@
-export type Carrier = 'SKT' | 'KT' | 'LG U+' | '알뜰폰'
+import { useState } from 'react'
 
-export type AuthMethod = '문자인증' | 'pass'
-
-export type AccountType = 'user' | 'guardian'
+export type AccountType = 'user' | 'guardian' | 'admin'
 
 export type ParentProfile = {
   name: string
@@ -15,141 +13,126 @@ export type ParentProfile = {
   consentAt: string
 }
 
-type UserIdType = 'email' | 'phone'
+type UserIdType = 'username' | 'email' | 'phone'
 
 export type SavedUser = {
   id: string
   idType: UserIdType
   password: string
   phone: string
-  carrier: Carrier
   name: string
-  residentFront: string
-  residentBackFirst: string
+  email?: string
   accountType?: AccountType
   parent?: ParentProfile
-}
-
-export function getUserIdType(value: string): UserIdType | null {
-  const trimmedValue = value.trim()
-  const onlyNumber = trimmedValue.replaceAll('-', '')
-
-  const isEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedValue)
-  const isPhone = /^01[016789]\d{7,8}$/.test(onlyNumber)
-
-  if (isEmail) return 'email'
-  if (isPhone) return 'phone'
-
-  return null
+  // 기존 브라우저 저장 데이터와의 호환을 위해 이전 필드는 선택값으로 유지합니다.
+  carrier?: 'SKT' | 'KT' | 'LG U+' | '알뜰폰'
+  residentFront?: string
+  residentBackFirst?: string
 }
 
 export function normalizeId(value: string) {
-  const trimmedValue = value.trim()
-
-  if (trimmedValue.includes('@')) {
-    return trimmedValue.toLowerCase()
-  }
-
-  return trimmedValue.replaceAll('-', '')
+  return value.trim().toLowerCase()
 }
 
 export function normalizePhone(value: string) {
   return value.trim().replaceAll('-', '')
 }
 
-export function isValidPhone(value: string) {
-  return /^01[016789]\d{7,8}$/.test(normalizePhone(value))
-}
+export const MASTER_ACCOUNT_ID = 'master'
+const MASTER_PASSWORD_DEFAULT = '1234'
 
-export function CarrierSelect({
-  carrier,
-  setCarrier,
-}: {
-  carrier: Carrier
-  setCarrier: (value: Carrier) => void
-}) {
+// 마스터(관리자) 로그인 여부를 판별합니다. 비밀번호는 localStorage의 'ansimMasterPassword'로 덮어쓸 수 있습니다.
+export function isMasterCredential(id: string, password: string) {
   return (
-    <div>
-      <label className="mb-2 block text-lg font-extrabold text-slate-800">
-        통신사
-      </label>
-
-      <select
-        value={carrier}
-        onChange={(event) => setCarrier(event.target.value as Carrier)}
-        className="h-16 w-full rounded-2xl border-2 border-slate-200 bg-slate-50 px-5 text-xl font-semibold outline-none transition focus:border-blue-500 focus:bg-white"
-      >
-        <option value="SKT">SKT</option>
-        <option value="KT">KT</option>
-        <option value="LG U+">LG U+</option>
-        <option value="알뜰폰">알뜰폰</option>
-      </select>
-    </div>
+    normalizeId(id) === MASTER_ACCOUNT_ID &&
+    password === (localStorage.getItem('ansimMasterPassword') ?? MASTER_PASSWORD_DEFAULT)
   )
 }
 
-export function PhoneInput({
-  phone,
-  setPhone,
-}: {
-  phone: string
-  setPhone: (value: string) => void
-}) {
-  return (
-    <div>
-      <label className="mb-2 block text-lg font-extrabold text-slate-800">
-        전화번호
-      </label>
+export const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
-      <input
-        value={phone}
-        onChange={(event) => setPhone(event.target.value)}
-        type="tel"
-        placeholder="01012345678"
-        className="h-16 w-full rounded-2xl border-2 border-slate-200 bg-slate-50 px-5 text-xl font-semibold outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:bg-white"
-      />
-    </div>
-  )
+// 시연용 목업 인증번호입니다. 실제 이메일 발송은 연동되어 있지 않습니다.
+export const DEMO_AUTH_CODE = '123456'
+
+export const AUTH_INPUT_CLASS =
+  'h-16 w-full rounded-2xl border-2 border-slate-200 bg-slate-50 px-5 text-xl font-semibold outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:bg-white'
+
+const USERS_STORAGE_KEY = 'ansimUsers'
+
+export function getSavedUsers(): SavedUser[] {
+  const savedUsers = localStorage.getItem(USERS_STORAGE_KEY)
+  return savedUsers ? (JSON.parse(savedUsers) as SavedUser[]) : []
 }
 
-export function AuthMethodSelector({
-  authMethod,
-  setAuthMethod,
-}: {
-  authMethod: AuthMethod
-  setAuthMethod: (value: AuthMethod) => void
-}) {
-  return (
-    <div>
-      <label className="mb-3 block text-lg font-extrabold text-slate-800">
-        인증 방식
-      </label>
+export function saveSavedUsers(users: SavedUser[]) {
+  localStorage.setItem(USERS_STORAGE_KEY, JSON.stringify(users))
+}
 
-      <div className="grid grid-cols-2 gap-3">
-        <button
-          type="button"
-          onClick={() => setAuthMethod('문자인증')}
-          className={`h-14 rounded-2xl text-lg font-black ${
-            authMethod === '문자인증'
-              ? 'bg-blue-600 text-white'
-              : 'bg-slate-100 text-slate-700'
-          }`}
-        >
-          문자 인증
-        </button>
+type EmailVerificationOptions = {
+  /** 인증 메일 발송 전 추가 검증. 에러 메시지를 반환하면 발송을 막습니다. */
+  onBeforeSend?: (email: string) => string | null
+}
 
-        <button
-          type="button"
-          onClick={() => setAuthMethod('pass')}
-          className={`h-14 rounded-2xl text-lg font-black ${
-            authMethod === 'pass'
-              ? 'bg-blue-600 text-white'
-              : 'bg-slate-100 text-slate-700'
-          }`}
-        >
-          PASS 인증
-        </button>
-      </div>
-    </div>
-  )
+/** 이메일 인증번호 발송 → 확인 흐름을 다루는 공용 훅. 아이디/비밀번호 찾기, 회원가입에서 재사용합니다. */
+export function useEmailVerification({ onBeforeSend }: EmailVerificationOptions = {}) {
+  const [email, setEmailValue] = useState('')
+  const [authCode, setAuthCode] = useState('')
+  const [isAuthRequested, setIsAuthRequested] = useState(false)
+  const [isVerified, setIsVerified] = useState(false)
+  const [error, setError] = useState('')
+
+  const resetVerification = () => {
+    setIsAuthRequested(false)
+    setIsVerified(false)
+    setAuthCode('')
+    setError('')
+  }
+
+  const setEmail = (value: string) => {
+    setEmailValue(value)
+    resetVerification()
+  }
+
+  const requestAuth = () => {
+    setError('')
+    setIsVerified(false)
+    const trimmedEmail = email.trim()
+    if (!EMAIL_PATTERN.test(trimmedEmail)) {
+      setError('올바른 이메일 주소를 입력해 주세요.')
+      return false
+    }
+    const validationError = onBeforeSend?.(trimmedEmail)
+    if (validationError) {
+      setError(validationError)
+      return false
+    }
+    setAuthCode('')
+    setIsAuthRequested(true)
+    alert(`인증 이메일이 발송되었습니다. 시연용 인증번호는 ${DEMO_AUTH_CODE}입니다.`)
+    return true
+  }
+
+  const verify = () => {
+    if (authCode !== DEMO_AUTH_CODE) {
+      setError('인증번호가 맞지 않습니다.')
+      return false
+    }
+    setError('')
+    setIsVerified(true)
+    return true
+  }
+
+  return {
+    email,
+    setEmail,
+    authCode,
+    setAuthCode,
+    isAuthRequested,
+    isVerified,
+    error,
+    setError,
+    requestAuth,
+    verify,
+    resetVerification,
+  }
 }
