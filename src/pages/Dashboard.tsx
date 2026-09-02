@@ -59,12 +59,6 @@ type MyHospital = {
   department?: string;
   address?: string;
 };
-type HealthLogEntry = {
-  id: number;
-  date: string;
-  heartRate?: number;
-  weightKg?: number;
-};
 type ParentLink = Pick<
   ParentProfile,
   "name" | "phone" | "relation" | "residentFront" | "residentBackFirst"
@@ -2402,7 +2396,6 @@ function HealthView({
   const [period, setPeriod] = useState("이번 주");
   const [sharing, setSharing] = useState(false);
   const hospitalsKey = `ansimMyHospitals:${careGroupKey}`;
-  const healthLogKey = `ansimHealthLog:${careGroupKey}`;
   const [hospitals, setHospitals] = useState<MyHospital[]>(() =>
     loadStored<MyHospital[]>(hospitalsKey, []),
   );
@@ -2423,49 +2416,6 @@ function HealthView({
   const removeHospital = (id: number) => {
     setHospitals((value) => value.filter((hospital) => hospital.id !== id));
   };
-
-  const [healthLog, setHealthLog] = useState<HealthLogEntry[]>(() =>
-    loadStored<HealthLogEntry[]>(healthLogKey, []),
-  );
-  const [addingLog, setAddingLog] = useState(false);
-
-  useEffect(
-    () => localStorage.setItem(healthLogKey, JSON.stringify(healthLog)),
-    [healthLogKey, healthLog],
-  );
-
-  const addHealthLog = (entry: Omit<HealthLogEntry, "id">) => {
-    setHealthLog((value) => [{ id: Date.now(), ...entry }, ...value]);
-    setAddingLog(false);
-    toast({ message: "건강 수치가 기록되었어요.", tone: "green" });
-  };
-
-  const removeHealthLog = (id: number) => {
-    setHealthLog((value) => value.filter((entry) => entry.id !== id));
-  };
-
-  const periodDays: Record<string, number> = {
-    "이번 주": 7,
-    "지난 4주": 28,
-    "최근 3개월": 90,
-  };
-  const periodCutoff = new Date();
-  periodCutoff.setDate(periodCutoff.getDate() - (periodDays[period] ?? 7));
-  const periodCutoffISO = periodCutoff.toLocaleDateString("sv-SE");
-  const healthLogInPeriod = healthLog.filter(
-    (entry) => entry.date >= periodCutoffISO,
-  );
-
-  const average = (values: number[]) =>
-    values.length === 0
-      ? null
-      : Math.round((values.reduce((sum, v) => sum + v, 0) / values.length) * 10) / 10;
-  const avgHeartRate = average(
-    healthLogInPeriod.flatMap((entry) => (entry.heartRate ? [entry.heartRate] : [])),
-  );
-  const avgWeight = average(
-    healthLogInPeriod.flatMap((entry) => (entry.weightKg ? [entry.weightKg] : [])),
-  );
 
   return (
     <Page
@@ -2496,14 +2446,22 @@ function HealthView({
         </div>
       }
     >
-      <section className="grid gap-5 md:grid-cols-4">
+      <section className="grid gap-5 md:grid-cols-3">
         <HealthMetric
-          icon="♥"
-          label="평균 혈압"
-          value="128/82"
-          unit="mmHg"
-          state="안정"
-          color="blue"
+          icon="✓"
+          label="복약"
+          value="93"
+          unit="%"
+          state="양호"
+          color="amber"
+        />
+        <HealthMetric
+          icon="?"
+          label="기억 하지 못한 횟수"
+          value="4"
+          unit="회"
+          state="주의"
+          color="rose"
         />
         <HealthMetric
           icon="◷"
@@ -2513,84 +2471,6 @@ function HealthView({
           state="좋음"
           color="violet"
         />
-        <HealthMetric
-          icon="♟"
-          label="평균 걸음"
-          value="5,840"
-          unit="걸음"
-          state="+12%"
-          color="emerald"
-        />
-        <HealthMetric
-          icon="✓"
-          label="복약 달성"
-          value="93"
-          unit="%"
-          state="양호"
-          color="amber"
-        />
-      </section>
-      <section className="mt-6 rounded-[1.5rem] border border-slate-200 bg-white p-6">
-        <div className="flex items-center justify-between">
-          <div>
-            <h2 className="text-lg font-black">
-              직접 기록한 건강 수치 · {period}
-            </h2>
-            <p className="mt-1 text-sm text-slate-400">
-              웨어러블 기기 없이도 심박수·체중을 직접 기록하고, 선택한 기간의
-              평균을 확인해요.
-            </p>
-          </div>
-          <button
-            onClick={() => setAddingLog(true)}
-            className="shrink-0 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-black text-white shadow-lg shadow-blue-200"
-          >
-            ＋ 수치 기록
-          </button>
-        </div>
-        <div className="mt-5 grid gap-5 sm:grid-cols-2">
-          <HealthMetric
-            icon="♡"
-            label="평균 심박수"
-            value={avgHeartRate != null ? String(avgHeartRate) : "-"}
-            unit="bpm"
-            state={avgHeartRate != null ? "기록 기반" : "기록 없음"}
-            color="rose"
-          />
-          <HealthMetric
-            icon="⚖"
-            label="평균 체중"
-            value={avgWeight != null ? String(avgWeight) : "-"}
-            unit="kg"
-            state={avgWeight != null ? "기록 기반" : "기록 없음"}
-            color="teal"
-          />
-        </div>
-        {healthLog.length > 0 && (
-          <div className="mt-5 space-y-2">
-            {healthLog.slice(0, 5).map((entry) => (
-              <div
-                key={entry.id}
-                className="flex items-center justify-between gap-3 rounded-2xl bg-slate-50 p-4"
-              >
-                <div>
-                  <p className="text-sm font-black">{entry.date}</p>
-                  <p className="mt-1 text-sm text-slate-500">
-                    {entry.heartRate != null && `심박수 ${entry.heartRate}bpm`}
-                    {entry.heartRate != null && entry.weightKg != null && " · "}
-                    {entry.weightKg != null && `체중 ${entry.weightKg}kg`}
-                  </p>
-                </div>
-                <button
-                  onClick={() => removeHealthLog(entry.id)}
-                  className="shrink-0 rounded-xl bg-slate-200 px-3 py-2 text-xs font-black text-slate-600"
-                >
-                  삭제
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
       </section>
       <section className="mt-6 grid gap-6 xl:grid-cols-[1.4fr_1fr]">
         <div className="rounded-[1.5rem] border border-slate-200 bg-white p-6 shadow-sm">
@@ -2598,7 +2478,7 @@ function HealthView({
             <div>
               <h2 className="text-xl font-black">주간 건강 흐름</h2>
               <p className="mt-1 text-sm text-slate-400">
-                활동량과 수면 상태를 함께 분석했어요
+                활동량과 기억 수준을 함께 분석했어요
               </p>
             </div>
             <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-black text-emerald-600">
@@ -2631,7 +2511,7 @@ function HealthView({
               ● <i className="not-italic text-blue-600">활동량</i>
             </span>
             <span>
-              ● <i className="not-italic text-blue-200">수면 충족도</i>
+              ● <i className="not-italic text-blue-200">기억 수준</i>
             </span>
           </div>
         </div>
@@ -2821,105 +2701,7 @@ function HealthView({
           onSave={addHospital}
         />
       )}
-      {addingLog && (
-        <HealthLogFormModal
-          onClose={() => setAddingLog(false)}
-          onSave={addHealthLog}
-        />
-      )}
     </Page>
-  );
-}
-
-function HealthLogFormModal({
-  onClose,
-  onSave,
-}: {
-  onClose: () => void;
-  onSave: (entry: Omit<HealthLogEntry, "id">) => void;
-}) {
-  const [date, setDate] = useState(() => new Date().toLocaleDateString("sv-SE"));
-  const [heartRate, setHeartRate] = useState("");
-  const [weightKg, setWeightKg] = useState("");
-  const [error, setError] = useState("");
-
-  const save = (event: React.FormEvent) => {
-    event.preventDefault();
-    if (!heartRate.trim() && !weightKg.trim()) {
-      setError("심박수 또는 체중 중 하나는 입력해 주세요.");
-      return;
-    }
-    onSave({
-      date,
-      heartRate: heartRate.trim() ? Number(heartRate) : undefined,
-      weightKg: weightKg.trim() ? Number(weightKg) : undefined,
-    });
-  };
-
-  return (
-    <Modal onClose={onClose}>
-      <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-rose-50 text-2xl">
-        ♡
-      </span>
-      <h2 className="mt-4 text-2xl font-black">건강 수치 기록</h2>
-      <p className="mt-2 text-sm leading-6 text-slate-500">
-        오늘의 심박수와 체중을 직접 기록해 보세요.
-      </p>
-      <form onSubmit={save} className="mt-6 space-y-4">
-        <label className="block">
-          <span className="mb-2 block text-sm font-black">날짜</span>
-          <input
-            type="date"
-            value={date}
-            onChange={(e) => setDate(e.target.value)}
-            className="h-12 w-full rounded-xl border-2 border-slate-200 bg-white px-4 font-bold outline-none focus:border-blue-500"
-          />
-        </label>
-        <label className="block">
-          <span className="mb-2 block text-sm font-black">심박수 (선택)</span>
-          <input
-            value={heartRate}
-            onChange={(e) => {
-              setHeartRate(e.target.value.replace(/\D/g, ""));
-              setError("");
-            }}
-            inputMode="numeric"
-            placeholder="예) 72"
-            className="h-12 w-full rounded-xl border-2 border-slate-200 bg-white px-4 font-bold outline-none focus:border-blue-500"
-          />
-        </label>
-        <label className="block">
-          <span className="mb-2 block text-sm font-black">체중 kg (선택)</span>
-          <input
-            value={weightKg}
-            onChange={(e) => {
-              setWeightKg(e.target.value.replace(/[^\d.]/g, ""));
-              setError("");
-            }}
-            inputMode="decimal"
-            placeholder="예) 58.2"
-            className="h-12 w-full rounded-xl border-2 border-slate-200 bg-white px-4 font-bold outline-none focus:border-blue-500"
-          />
-        </label>
-        {error && (
-          <p className="rounded-xl bg-red-50 p-3 text-sm font-bold text-red-600">
-            {error}
-          </p>
-        )}
-        <div className="flex gap-3 pt-2">
-          <button
-            type="button"
-            onClick={onClose}
-            className="flex-1 rounded-xl bg-slate-100 py-3 font-black"
-          >
-            취소
-          </button>
-          <button className="flex-[1.5] rounded-xl bg-blue-600 py-3 font-black text-white">
-            기록하기
-          </button>
-        </div>
-      </form>
-    </Modal>
   );
 }
 
@@ -3243,7 +3025,7 @@ function HealthMetric({
           {icon}
         </span>
         <span
-          className={`rounded-full px-2 py-1 text-[10px] font-black ${colors[color]}`}
+          className={`rounded-full px-3 py-1 text-sm font-black ${colors[color]}`}
         >
           {state}
         </span>
