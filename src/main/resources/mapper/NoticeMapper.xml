@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTO Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="hanium.damso.mapper.INoticeMapper">
+    <sql id="alive">
+        FROM NOTICE N
+        WHERE N.IS_DELETED = 'N'
+    </sql>
+
+    <sql id="columns">
+        N.NOTICE_ID AS ID,
+        N.CATEGORY,
+        N.TITLE,
+        N.SUMMARY,
+        N.CONTENT,
+        N.IS_IMPORTANT = 'Y' AS IMPORTANT,
+        DATE_FORMAT(N.PUBLISHED_AT, '%Y-%m-%d') AS `DATE`,
+        UNIX_TIMESTAMP(N.CREATED_AT) * 1000 AS CREATED_AT,
+        UNIX_TIMESTAMP(N.UPDATED_AT) * 1000 AS UPDATED_AT
+    </sql>
+
+    <select id="selectList" resultType="hanium.damso.dto.NoticeDTO">
+        SELECT <include refid="columns"/>
+        <include refid="alive"/>
+        ORDER BY N.PUBLISHED_AT DESC, N.NOTICE_ID DESC
+    </select>
+
+    <select id="selectNotice" resultType="hanium.damso.dto.NoticeDTO">
+        SELECT <include refid="columns"/>
+        <include refid="alive"/>
+          AND N.NOTICE_ID = #{id}
+    </select>
+</mapper>

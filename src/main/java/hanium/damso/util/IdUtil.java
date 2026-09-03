@@ -33,6 +33,7 @@ public final class IdUtil {
     public static final String COMMENT = "CMT";
     public static final String LINK = "LNK";
     public static final String TAG = "TAG";
+    public static final String NOTICE = "NTC";
 
     /**
      * base36으로 적은 epoch millis의 자릿수. {@code Long.MAX_VALUE}가 13자리라 이 폭을 넘길 수
