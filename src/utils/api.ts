@@ -428,6 +428,32 @@ export const fetchMessages = (roomId: string) =>
 export const say = (roomId: string, message: string) =>
   post<ApiTurn>('/api/chat/say', { roomId, message })
 
+// ================= 공지사항 =================
+
+export type ApiNoticeCategory = 'MAINTENANCE' | 'SAFETY' | 'UPDATE' | 'GENERAL'
+
+/**
+ * 서버 NoticeDTO.
+ *
+ * userId가 없습니다 — 공지는 주인이 없는 운영팀 글이라, 로그인한 사람이면 누구나 같은 목록을
+ * 봅니다. category는 영문 상수로 오고 한국어 라벨은 appData의 noticeCategoryLabels가 붙입니다.
+ */
+export type ApiNotice = {
+  id: string
+  category: ApiNoticeCategory
+  title: string
+  summary?: string
+  content: string
+  important?: boolean
+  /** 게시일 YYYY-MM-DD. 등록일시(createdAt)와 다를 수 있습니다. */
+  date: string
+  createdAt?: number
+  updatedAt?: number
+}
+
+/** 조회 전용입니다. 등록·수정은 운영자가 DB에서 합니다 — 서버에 쓰기 엔드포인트가 없습니다. */
+export const fetchNotices = () => get<ApiNotice[]>('/api/notice/list')
+
 // ================= 음성 =================
 //
 // 두 엔드포인트의 모양이 서로 다릅니다. transcribe는 봉투를 돌려주지만 보내는 것이 폼이 아니라

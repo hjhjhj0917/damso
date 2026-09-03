@@ -10,7 +10,7 @@
  * 24시간제 HH:mm으로, 상태를 영문 상수로 줍니다. 한국어 표기를 만드는 일은 화면의 몫입니다.
  */
 
-import type { ApiSchedule, ApiScheduleType } from './api'
+import type { ApiNoticeCategory, ApiSchedule, ApiScheduleType } from './api'
 
 export const navItems = [
   { id: 'home', label: '홈', icon: '⌂' },
@@ -139,6 +139,14 @@ export const scheduleTypeLabels: Record<ApiScheduleType, string> = {
 /** 일정 상태 라벨. */
 export function scheduleStatusLabel(status: ApiSchedule['status']) {
   return status === 'DONE' ? '완료' : '예정'
+}
+
+/** 공지 분류 라벨. 서버는 NOTICE.CATEGORY의 영문 상수로 주고 한국어는 여기서 붙입니다. */
+export const noticeCategoryLabels: Record<ApiNoticeCategory, string> = {
+  MAINTENANCE: '점검 안내',
+  SAFETY: '안전 안내',
+  UPDATE: '업데이트',
+  GENERAL: '일반 공지',
 }
 
 /** 자서전 상태 라벨. */

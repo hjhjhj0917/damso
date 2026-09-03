@@ -26,6 +26,7 @@ import {
   fetchDiary,
   fetchLinks,
   fetchMessages,
+  fetchNotices,
   fetchSchedules,
   fetchSession,
   fetchSpeechConfig,
@@ -46,6 +47,7 @@ import {
   type ApiDiary,
   type ApiLink,
   type ApiMessage,
+  type ApiNotice,
   type ApiSchedule,
 } from "../utils/api";
 import AdminView from "./AdminView";
@@ -59,6 +61,7 @@ import {
   formatTime,
   loadStored,
   navItems,
+  noticeCategoryLabels,
   quickPrompts,
   scheduleReminderMessage,
   scheduleStatusLabel,
@@ -112,16 +115,6 @@ type AppNotification = {
   tab: ServiceTab;
   targetRole?: "user" | "guardian";
 };
-type Announcement = {
-  id: number;
-  category: string;
-  title: string;
-  summary: string;
-  content: string;
-  date: string;
-  important?: boolean;
-};
-
 const familyContacts: FamilyContact[] = [
   {
     id: 1,
@@ -136,40 +129,6 @@ const familyContacts: FamilyContact[] = [
     relation: "딸",
     phone: "010-73**-42**",
     emoji: "👩🏻",
-  },
-];
-
-const announcements: Announcement[] = [
-  {
-    id: 1,
-    category: "점검 안내",
-    title: "7월 정기 서비스 점검 안내",
-    summary: "7월 8일 새벽 2시부터 4시까지 서비스 이용이 잠시 제한됩니다.",
-    content:
-      "더 안정적인 서비스 제공을 위해 7월 8일(수) 오전 2시부터 오전 4시까지 정기 점검을 진행합니다. 점검 중에는 로그인, AI 대화와 기록 조회가 일시적으로 제한될 수 있습니다.",
-    date: "2026.07.03",
-    important: true,
-  },
-  {
-    id: 2,
-    category: "안전 안내",
-    title: "건강 리포트 이용 시 꼭 확인해 주세요",
-    summary:
-      "건강 리포트는 생활 관리를 위한 참고 정보이며 의료진의 진단을 대신하지 않습니다.",
-    content:
-      "건강 리포트는 대화와 생활 기록을 바탕으로 제공되는 참고 정보입니다. 몸이 불편하거나 이상 증상이 계속되면 가까운 의료기관에 전화해 진료를 예약하고, 응급 상황에는 즉시 119에 연락해 주세요.",
-    date: "2026.07.02",
-    important: true,
-  },
-  {
-    id: 3,
-    category: "업데이트",
-    title: "일정 직접 등록과 데일리노트 코멘트 기능 추가",
-    summary:
-      "캘린더에 일정을 직접 등록하고 가족과 노트 코멘트를 나눌 수 있습니다.",
-    content:
-      "일정 캘린더에서 날짜와 내용을 선택해 일정을 직접 등록할 수 있습니다. 데일리노트 상세 화면에서는 연결된 사용자와 보호자가 코멘트를 남기고 알림을 주고받을 수 있습니다.",
-    date: "2026.07.01",
   },
 ];
 
@@ -751,8 +710,34 @@ function Page({
   );
 }
 
+/**
+ * 공지사항. 목록은 서버(NOTICE 표)가 갖고 있고, 이 화면은 읽기만 합니다.
+ *
+ * 실패해도 토스트를 띄우지 않습니다. 홈 화면 아래에 딸린 곁가지라, 공지를 못 불러온 것 때문에
+ * 방금 한 다른 일의 알림을 밀어내면 안 됩니다. 대신 자리에 안내 문구를 남깁니다.
+ */
 function Announcements() {
-  const [selected, setSelected] = useState<Announcement | null>(null);
+  const [notices, setNotices] = useState<ApiNotice[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [failed, setFailed] = useState(false);
+  const [selected, setSelected] = useState<ApiNotice | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    void fetchNotices().then((result) => {
+      if (cancelled) return;
+
+      if (result.status === "success" && result.data) setNotices(result.data);
+      else setFailed(true);
+      setLoading(false);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   return (
     <section className="mx-auto max-w-[1400px] px-5 pt-5 sm:px-8 sm:pt-8 lg:px-10 lg:pt-10">
       <div className="overflow-hidden rounded-[1.5rem] border border-slate-200 bg-white shadow-sm">
@@ -766,7 +751,7 @@ function Announcements() {
           </span>
         </div>
         <div className="divide-y divide-slate-100">
-          {announcements.map((notice) => (
+          {notices.map((notice) => (
             <button
               key={notice.id}
               onClick={() => setSelected(notice)}
@@ -775,22 +760,31 @@ function Announcements() {
               <span
                 className={`shrink-0 rounded-full px-2.5 py-1 text-[10px] font-black ${notice.important ? "bg-red-50 text-red-600" : "bg-blue-50 text-blue-600"}`}
               >
-                {notice.category}
+                {noticeCategoryLabels[notice.category]}
               </span>
               <span className="min-w-0 flex-1">
                 <b className="block truncate text-sm text-slate-800">
                   {notice.title}
                 </b>
                 <span className="mt-1 hidden truncate text-xs text-slate-400 sm:block">
-                  {notice.summary}
+                  {notice.summary ?? notice.content}
                 </span>
               </span>
               <span className="shrink-0 text-xs text-slate-400">
-                {notice.date}
+                {formatDate(notice.date)}
               </span>
               <span className="text-slate-300">›</span>
             </button>
           ))}
+          {notices.length === 0 && (
+            <p className="px-5 py-10 text-center text-sm font-bold text-slate-400 sm:px-6">
+              {loading
+                ? "공지사항을 불러오는 중이에요."
+                : failed
+                  ? "공지사항을 불러오지 못했어요. 잠시 후 다시 열어 주세요."
+                  : "아직 등록된 공지사항이 없어요."}
+            </p>
+          )}
         </div>
       </div>
       {selected && (
@@ -798,11 +792,11 @@ function Announcements() {
           <span
             className={`rounded-full px-3 py-1 text-xs font-black ${selected.important ? "bg-red-50 text-red-600" : "bg-blue-50 text-blue-600"}`}
           >
-            {selected.category}
+            {noticeCategoryLabels[selected.category]}
           </span>
           <h2 className="mt-4 text-2xl font-black">{selected.title}</h2>
           <p className="mt-2 text-sm font-bold text-slate-400">
-            {selected.date} · 담소 운영팀
+            {formatDate(selected.date)} · 담소 운영팀
           </p>
           <p className="mt-6 rounded-2xl bg-slate-50 p-5 text-sm leading-7 text-slate-600">
             {selected.content}
