@@ -1,57 +1,89 @@
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import {
-  getSavedUsers,
   normalizePhone,
-  saveParentLink,
-  saveSavedUsers,
   toAccountType,
   type AccountType,
-  type ParentProfile,
-  type SavedUser,
 } from "../components/authShared";
 import {
   changePassword as changePasswordRequest,
+  completeSchedule,
+  createChatRoom,
+  createComment,
+  createLink,
+  createSchedule,
+  deleteAutobiography as deleteAutobiographyRequest,
+  deleteChatRoom,
+  deleteComment,
+  deleteDiary,
+  deleteLink,
+  deleteSchedule,
   errorMessage,
+  fetchAutobiographies,
+  fetchChatRooms,
+  fetchComments,
+  fetchDiaries,
+  fetchDiary,
+  fetchLinks,
+  fetchMessages,
+  fetchSchedules,
   fetchSession,
+  fetchSpeechConfig,
+  generateAutobiography,
+  generateDiary,
   logout as logoutRequest,
+  messageOf,
+  say,
+  transcribe,
+  updateAutobiography,
+  updateComment,
   updateProfile,
+  verifyWard,
   withdraw as withdrawRequest,
+  type ApiAutobiography,
+  type ApiChatRoom,
+  type ApiComment,
+  type ApiDiary,
+  type ApiLink,
+  type ApiMessage,
+  type ApiSchedule,
 } from "../utils/api";
 import AdminView from "./AdminView";
 import { PrivacyView } from "./Support";
 import {
+  autobiographyStatusLabel,
   findDueSchedules,
-  initialChapters,
-  initialMessages,
-  initialNotes,
-  initialSchedules,
+  formatDate,
+  formatMoment,
+  formatTime,
   loadStored,
   navItems,
   quickPrompts,
   scheduleReminderMessage,
+  scheduleStatusLabel,
   toKoreanTimeLabel,
-  todayKorean,
-  type BiographyChapter,
-  type ChatMessage,
-  type DailyNote,
-  type NoteComment,
-  type ScheduleEvent,
+  todayISO,
   type ServiceTab,
 } from "../utils/appData";
 import {
   searchHospitalsByAddress,
   type HospitalSearchResult,
 } from "../utils/kakaoLocal";
+import { canRecordAudio, useVoiceRecorder } from "../utils/recorder";
+import { useSpeaker } from "../utils/speaker";
 
+/**
+ * 화면을 즉시 그리기 위한 로그인 사본. 진짜 세션은 서버가 갖습니다.
+ *
+ * 피보호인 연결 정보(parentName 등)가 예전에는 여기 얹혀 있었지만 이제 USER_LINK 표에 있고,
+ * Dashboard가 fetchLinks로 받아 linkedWard로 씁니다. 로그인 사본에 권한을 담아 두면
+ * 그 사본을 고치는 것만으로 남의 기록을 볼 수 있게 됩니다.
+ */
 type Session = {
   id: string;
   name: string;
   phone: string;
   accountType?: AccountType;
-  parentName?: string;
-  parentPhone?: string;
-  parentRelation?: string;
 };
 type Toast = { message: string; tone?: "blue" | "green" };
 type FamilyContact = {
@@ -67,16 +99,6 @@ type MyHospital = {
   phone: string;
   department?: string;
   address?: string;
-};
-type ParentLink = Pick<
-  ParentProfile,
-  "name" | "phone" | "relation" | "residentFront" | "residentBackFirst"
->;
-type ChatThread = {
-  id: string;
-  title: string;
-  createdAt: string;
-  messages: ChatMessage[];
 };
 type AppNotification = {
   id: number;
@@ -162,25 +184,13 @@ function Dashboard() {
       phone: "01012345678",
     }),
   );
-  const [messages, setMessages] = useState<ChatMessage[]>(() =>
-    (() => {
-      const savedMessages = loadStored<ChatMessage[]>("ansimMessages", []);
-      return savedMessages.length <= 1 ? initialMessages : savedMessages;
-    })(),
-  );
-  const [notes, setNotes] = useState<DailyNote[]>(() =>
-    loadStored<DailyNote[]>("ansimNotes", initialNotes).map((note) =>
-      note.title === "AI 파트너와 나눈 오늘의 이야기"
-        ? { ...note, title: "오늘의 이야기" }
-        : note,
-    ),
-  );
-  const [chapters, setChapters] = useState<BiographyChapter[]>(() =>
-    loadStored("ansimChapters", initialChapters),
-  );
-  const [schedules, setSchedules] = useState<ScheduleEvent[]>(() =>
-    loadStored("ansimSchedules", initialSchedules),
-  );
+  // 기록은 전부 서버가 갖고 있습니다. 화면은 사본을 들고 있다가, 쓰기에 성공했을 때만
+  // 그 사본을 고칩니다 — 순서를 뒤집으면 저장에 실패해도 화면에는 남아 다음 새로고침에
+  // 조용히 되돌아갑니다.
+  const [notes, setNotes] = useState<ApiDiary[]>([]);
+  const [chapters, setChapters] = useState<ApiAutobiography[]>([]);
+  const [schedules, setSchedules] = useState<ApiSchedule[]>([]);
+  const [links, setLinks] = useState<ApiLink[]>([]);
   const [toast, setToast] = useState<Toast | null>(null);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [supportCallOpen, setSupportCallOpen] = useState(false);
@@ -199,12 +209,17 @@ function Dashboard() {
   );
   const isGuardian = session.accountType === "guardian";
   const isAdmin = session.accountType === "admin";
-  const hasLinkedParent = Boolean(session.parentName);
-  const subjectName = session.parentName || "피보호인";
+  // 연결 정보는 이제 서버(USER_LINK)가 갖습니다. 보호자에게는 첫 번째 피보호인이 그 대상입니다 —
+  // 표는 여러 명을 담을 수 있지만 화면은 아직 한 명을 전제로 그려져 있습니다.
+  const linkedWard = isGuardian ? links[0] : undefined;
+  const hasLinkedParent = Boolean(linkedWard?.wardId);
+  const subjectName = linkedWard?.wardName || "피보호인";
+  /** 보호자가 볼 때는 피보호인의 기록을, 어르신이 볼 때는 자기 기록을 부릅니다. */
+  const subjectId = isGuardian ? linkedWard?.wardId : session.id;
   // 사용자 계정과, 그 사람을 돌보는 보호자 계정이 같은 피보호인의 병원 목록·건강 기록을
   // 공유하도록 피보호인 본인의 전화번호를 공용 키로 사용합니다.
   const careGroupKey = isGuardian
-    ? normalizePhone(session.parentPhone ?? session.id)
+    ? normalizePhone(linkedWard?.wardPhone ?? session.id)
     : normalizePhone(session.phone) || session.id;
   const visibleNavItems = isGuardian
     ? navItems.filter((item) =>
@@ -220,22 +235,6 @@ function Dashboard() {
       notification.targetRole === (isGuardian ? "guardian" : "user"),
   );
 
-  useEffect(
-    () => localStorage.setItem("ansimMessages", JSON.stringify(messages)),
-    [messages],
-  );
-  useEffect(
-    () => localStorage.setItem("ansimNotes", JSON.stringify(notes)),
-    [notes],
-  );
-  useEffect(
-    () => localStorage.setItem("ansimChapters", JSON.stringify(chapters)),
-    [chapters],
-  );
-  useEffect(
-    () => localStorage.setItem("ansimSchedules", JSON.stringify(schedules)),
-    [schedules],
-  );
   useEffect(
     () =>
       localStorage.setItem("ansimNotifications", JSON.stringify(notifications)),
@@ -265,8 +264,10 @@ function Dashboard() {
   }, [toast]);
 
   // 오늘 일정 중 시간이 된(복약, 병원, 치료 등) 항목을 실시간으로 알려줍니다.
-  const notifiedScheduleIdsRef = useRef<Set<number>>(
-    new Set(loadStored<number[]>("ansimNotifiedScheduleIds", [])),
+  // 일정 ID가 이제 문자열입니다. Set<number>로 두면 has()가 언제나 false라 같은 알림이
+  // 1분마다 반복됩니다 — 에러 없이 시끄러워지는 종류의 고장입니다.
+  const notifiedScheduleIdsRef = useRef<Set<string>>(
+    new Set(loadStored<string[]>("ansimNotifiedScheduleIds", [])),
   );
   useEffect(() => {
     if (!notificationsEnabled) return;
@@ -279,8 +280,8 @@ function Dashboard() {
         JSON.stringify([...notifiedScheduleIdsRef.current]),
       );
       setNotifications((value) => [
-        ...due.map((schedule) => ({
-          id: Date.now() + schedule.id,
+        ...due.map((schedule, index) => ({
+          id: Date.now() + index,
           message: scheduleReminderMessage(schedule),
           createdAt: "방금",
           tab: "calendar" as const,
@@ -326,13 +327,58 @@ function Dashboard() {
     };
   }, [navigate]);
 
+  /**
+   * 연결 목록을 먼저 부릅니다. 보호자가 누구의 기록을 볼지가 여기서 정해지므로, 이것 없이
+   * 기록을 부르면 자기 것(비어 있음)을 부르게 됩니다.
+   */
+  const reloadLinks = async () => {
+    const result = await fetchLinks();
+    if (result.status === "success" && result.data) setLinks(result.data);
+  };
+
+  useEffect(() => {
+    void (async () => {
+      await reloadLinks();
+    })();
+  }, []);
+
+  /**
+   * 기록을 불러옵니다. subjectId가 정해진 뒤에 돕니다 — 보호자가 연결 전이면 부를 대상이 없습니다.
+   *
+   * 세 요청을 한꺼번에 보냅니다. 순서대로 기다릴 이유가 없고, 서로를 기다리게 하면 화면이
+   * 세 번에 걸쳐 채워집니다.
+   */
+  const reloadRecords = async (targetId?: string) => {
+    if (!targetId) {
+      setNotes([]);
+      setSchedules([]);
+      setChapters([]);
+      return;
+    }
+
+    const [diaries, scheduleList, autobiographies] = await Promise.all([
+      fetchDiaries(targetId),
+      fetchSchedules({ userId: targetId }),
+      fetchAutobiographies(targetId),
+    ]);
+
+    if (diaries.status === "success" && diaries.data) setNotes(diaries.data);
+    if (scheduleList.status === "success" && scheduleList.data) setSchedules(scheduleList.data);
+    if (autobiographies.status === "success" && autobiographies.data)
+      setChapters(autobiographies.data);
+  };
+
+  useEffect(() => {
+    void (async () => {
+      await reloadRecords(subjectId);
+    })();
+  }, [subjectId]);
+
   const go = (tab: ServiceTab) => navigate(`/dashboard/${tab}`);
 
   /**
    * 서버에 저장하고, 성공했을 때만 화면 상태를 바꿉니다. 순서를 뒤집으면 저장에 실패해도
    * 화면에는 바뀐 값이 남아 다음 새로고침에 조용히 되돌아갑니다.
-   *
-   * 피보호인 연결 정보(parentName 등)는 아직 서버에 없어서 세션 캐시에만 반영합니다.
    */
   const saveProfile = async (next: Session) => {
     const changedProfile =
@@ -525,27 +571,13 @@ function Dashboard() {
         {activeTab === "home" && <Announcements />}
         {activeTab === "chat" && (
           <ChatView
-            messages={messages}
-            setMessages={setMessages}
-            onCreateNote={(note) => {
+            userId={session.id}
+            userName={session.name}
+            toast={setToast}
+            onNoteCreated={(note) => {
               setNotes((value) => [note, ...value]);
-              setSchedules((value) => [
-                {
-                  id: Date.now() + 2,
-                  date: new Date().toLocaleDateString("sv-SE"),
-                  time: new Date().toLocaleTimeString("ko-KR", {
-                    hour: "numeric",
-                    minute: "2-digit",
-                  }),
-                  title: "데일리노트 작성 완료",
-                  type: "daily",
-                  description: note.content,
-                  status: "완료",
-                },
-                ...value,
-              ]);
               setToast({
-                message: "오늘 이야기와 일정 기록이 자동으로 저장되었어요.",
+                message: "오늘 이야기를 데일리노트로 정리했어요.",
                 tone: "green",
               });
             }}
@@ -558,7 +590,7 @@ function Dashboard() {
             toast={setToast}
             subjectName={isGuardian ? subjectName : undefined}
             readOnly={isGuardian}
-            authorName={session.name}
+            currentUserId={session.id}
             onNotify={addNotification}
           />
         )}
@@ -576,6 +608,8 @@ function Dashboard() {
             chapters={chapters}
             setChapters={setChapters}
             noteCount={notes.length}
+            readOnly={isGuardian}
+            ownerName={isGuardian ? subjectName : session.name}
             toast={setToast}
           />
         )}
@@ -589,6 +623,8 @@ function Dashboard() {
         {activeTab === "mypage" && (
           <MyPage
             session={session}
+            links={links}
+            reloadLinks={reloadLinks}
             saveProfile={saveProfile}
             go={go}
             toast={setToast}
@@ -822,7 +858,7 @@ function GuardianHomeView({
 }: {
   guardianName: string;
   subjectName: string;
-  notes: DailyNote[];
+  notes: ApiDiary[];
   notificationCount: number;
   go: (tab: ServiceTab) => void;
 }) {
@@ -928,7 +964,7 @@ function GuardianHomeView({
                 <span className="min-w-0 flex-1">
                   <b className="block truncate text-sm">{note.title}</b>
                   <span className="mt-1 block text-xs text-slate-400">
-                    {note.date} · {note.mood}
+                    {formatDate(note.date)} · {note.mood ?? "기록"}
                   </span>
                 </span>
                 <span className="text-slate-300">›</span>
@@ -963,18 +999,21 @@ function CalendarView({
   isGuardian,
   toast,
 }: {
-  schedules: ScheduleEvent[];
-  setSchedules: React.Dispatch<React.SetStateAction<ScheduleEvent[]>>;
+  schedules: ApiSchedule[];
+  setSchedules: React.Dispatch<React.SetStateAction<ApiSchedule[]>>;
   subjectName?: string;
   isGuardian: boolean;
   toast: (toast: Toast) => void;
 }) {
-  const [visibleMonth, setVisibleMonth] = useState(new Date(2026, 6, 1));
-  const [selectedDate, setSelectedDate] = useState("2026-07-02");
-  const todayISO = new Date().toLocaleDateString("sv-SE");
-  const [selectedEvent, setSelectedEvent] = useState<ScheduleEvent | null>(
-    null,
-  );
+  // 오늘이 있는 달에서 시작합니다. 예전에는 목업 데이터가 있던 2026년 7월로 고정돼 있어서
+  // 새 계정으로 들어오면 빈 달이 먼저 보였습니다.
+  const today = todayISO();
+  const [visibleMonth, setVisibleMonth] = useState(() => {
+    const now = new Date();
+    return new Date(now.getFullYear(), now.getMonth(), 1);
+  });
+  const [selectedDate, setSelectedDate] = useState(today);
+  const [selectedEvent, setSelectedEvent] = useState<ApiSchedule | null>(null);
   const [adding, setAdding] = useState(false);
   const year = visibleMonth.getFullYear();
   const month = visibleMonth.getMonth();
@@ -999,38 +1038,38 @@ function CalendarView({
     .filter((schedule) => schedule.date === selectedDate)
     .sort((a, b) => a.time.localeCompare(b.time));
   const upcomingSchedules = [...schedules]
-    .filter((schedule) => schedule.status === "예정")
+    .filter((schedule) => schedule.status === "SCHEDULED")
     .sort((a, b) => `${a.date}${a.time}`.localeCompare(`${b.date}${b.time}`))
     .slice(0, 4);
   const typeStyle: Record<
-    ScheduleEvent["type"],
+    ApiSchedule["scheduleType"],
     { label: string; dot: string; card: string; icon: string }
   > = {
-    hospital: {
+    HOSPITAL: {
       label: "병원 예약",
       dot: "bg-rose-500",
       card: "bg-rose-50 text-rose-700",
       icon: "🏥",
     },
-    medication: {
+    MEDICATION: {
       label: "복약",
       dot: "bg-blue-500",
       card: "bg-blue-50 text-blue-700",
       icon: "💊",
     },
-    treatment: {
+    TREATMENT: {
       label: "치료",
       dot: "bg-violet-500",
       card: "bg-violet-50 text-violet-700",
       icon: "🩺",
     },
-    daily: {
+    DAILY: {
       label: "일상 기록",
       dot: "bg-emerald-500",
       card: "bg-emerald-50 text-emerald-700",
       icon: "📘",
     },
-    personal: {
+    PERSONAL: {
       label: "직접 등록",
       dot: "bg-cyan-500",
       card: "bg-cyan-50 text-cyan-700",
@@ -1042,6 +1081,44 @@ function CalendarView({
     day: "numeric",
     weekday: "long",
   }).format(new Date(`${selectedDate}T00:00:00`));
+
+  /** 저장에 성공했을 때만 화면 목록을 고칩니다. */
+  const saveSchedule = async (schedule: ApiSchedule) => {
+    setSchedules((value) => [...value, schedule]);
+    setAdding(false);
+    toast({ message: "일정을 등록했어요.", tone: "green" });
+  };
+
+  const toggleDone = async (schedule: ApiSchedule) => {
+    const done = schedule.status !== "DONE";
+    const result = await completeSchedule(schedule.id, done);
+    if (result.status !== "success") {
+      toast({ message: errorMessage(result) });
+      return;
+    }
+
+    setSchedules((value) =>
+      value.map((item) =>
+        item.id === schedule.id ? { ...item, status: done ? "DONE" : "SCHEDULED" } : item,
+      ),
+    );
+    setSelectedEvent(null);
+    toast({ message: done ? "완료로 표시했어요." : "예정으로 되돌렸어요.", tone: "green" });
+  };
+
+  const removeSchedule = async (schedule: ApiSchedule) => {
+    if (!window.confirm("이 일정을 삭제할까요?")) return;
+
+    const result = await deleteSchedule(schedule.id);
+    if (result.status !== "success") {
+      toast({ message: errorMessage(result) });
+      return;
+    }
+
+    setSchedules((value) => value.filter((item) => item.id !== schedule.id));
+    setSelectedEvent(null);
+    toast({ message: "일정을 삭제했어요.", tone: "green" });
+  };
 
   return (
     <Page
@@ -1115,7 +1192,7 @@ function CalendarView({
                   className={`min-h-20 border-b border-r border-slate-100 p-1.5 text-left transition sm:min-h-24 sm:p-2 ${selected ? "bg-blue-50 ring-2 ring-inset ring-blue-500" : "hover:bg-slate-50"} ${cell.currentMonth ? "" : "bg-slate-50/50 text-slate-300"}`}
                 >
                   <span
-                    className={`flex h-7 w-7 items-center justify-center rounded-full text-xs font-black ${cell.date === todayISO ? "bg-blue-600 text-white" : ""}`}
+                    className={`flex h-7 w-7 items-center justify-center rounded-full text-xs font-black ${cell.date === today ? "bg-blue-600 text-white" : ""}`}
                   >
                     {cell.day}
                   </span>
@@ -1124,7 +1201,7 @@ function CalendarView({
                       <span
                         key={schedule.id}
                         title={schedule.title}
-                        className={`h-2 w-2 rounded-full ${typeStyle[schedule.type].dot}`}
+                        className={`h-2 w-2 rounded-full ${typeStyle[schedule.scheduleType].dot}`}
                       />
                     ))}
                   </div>
@@ -1153,7 +1230,7 @@ function CalendarView({
             <h2 className="mt-1 text-xl font-black">{selectedDateLabel}</h2>
             <div className="mt-5 space-y-3">
               {selectedSchedules.map((schedule) => {
-                const style = typeStyle[schedule.type];
+                const style = typeStyle[schedule.scheduleType];
                 return (
                   <button
                     key={schedule.id}
@@ -1167,13 +1244,13 @@ function CalendarView({
                     </span>
                     <span className="min-w-0 flex-1">
                       <span className="text-xs font-black text-slate-400">
-                        {schedule.time} · {style.label}
+                        {toKoreanTimeLabel(schedule.time)} · {style.label}
                       </span>
                       <b className="mt-1 block text-sm">{schedule.title}</b>
                       <span
-                        className={`mt-2 inline-flex rounded-full px-2 py-0.5 text-[10px] font-black ${schedule.status === "완료" ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}
+                        className={`mt-2 inline-flex rounded-full px-2 py-0.5 text-[10px] font-black ${schedule.status === "DONE" ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}
                       >
-                        {schedule.status}
+                        {scheduleStatusLabel(schedule.status)}
                       </span>
                     </span>
                     <span className="text-slate-300">›</span>
@@ -1204,12 +1281,12 @@ function CalendarView({
                   className="flex w-full items-center gap-3 text-left"
                 >
                   <span
-                    className={`h-3 w-3 rounded-full ${typeStyle[schedule.type].dot}`}
+                    className={`h-3 w-3 rounded-full ${typeStyle[schedule.scheduleType].dot}`}
                   />
                   <span className="min-w-0 flex-1">
                     <b className="block truncate text-sm">{schedule.title}</b>
                     <span className="text-xs text-slate-400">
-                      {schedule.date.replaceAll("-", ".")} · {schedule.time}
+                      {schedule.date.replaceAll("-", ".")} · {toKoreanTimeLabel(schedule.time)}
                     </span>
                   </span>
                 </button>
@@ -1221,23 +1298,23 @@ function CalendarView({
       {selectedEvent && (
         <Modal onClose={() => setSelectedEvent(null)}>
           <span
-            className={`flex h-14 w-14 items-center justify-center rounded-2xl text-2xl ${typeStyle[selectedEvent.type].card}`}
+            className={`flex h-14 w-14 items-center justify-center rounded-2xl text-2xl ${typeStyle[selectedEvent.scheduleType].card}`}
           >
-            {typeStyle[selectedEvent.type].icon}
+            {typeStyle[selectedEvent.scheduleType].icon}
           </span>
           <div className="mt-4 flex items-center gap-2">
             <span className="text-sm font-black text-blue-600">
-              {typeStyle[selectedEvent.type].label}
+              {typeStyle[selectedEvent.scheduleType].label}
             </span>
             <span
-              className={`rounded-full px-2 py-1 text-[10px] font-black ${selectedEvent.status === "완료" ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}
+              className={`rounded-full px-2 py-1 text-[10px] font-black ${selectedEvent.status === "DONE" ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}
             >
-              {selectedEvent.status}
+              {scheduleStatusLabel(selectedEvent.status)}
             </span>
           </div>
           <h2 className="mt-2 text-2xl font-black">{selectedEvent.title}</h2>
           <p className="mt-3 font-bold text-slate-500">
-            {selectedEvent.date.replaceAll("-", ".")} · {selectedEvent.time}
+            {selectedEvent.date.replaceAll("-", ".")} · {toKoreanTimeLabel(selectedEvent.time)}
           </p>
           {selectedEvent.location && (
             <p className="mt-2 text-sm font-bold text-slate-500">
@@ -1246,14 +1323,14 @@ function CalendarView({
           )}
           <div className="mt-6 rounded-2xl bg-slate-50 p-5">
             <p className="text-xs font-black text-slate-400">
-              {selectedEvent.type === "daily"
+              {selectedEvent.scheduleType === "DAILY"
                 ? "일상 기록 내용"
-                : selectedEvent.status === "완료"
+                : selectedEvent.status === "DONE"
                   ? "진행 및 치료 기록"
                   : "일정 안내"}
             </p>
             <p className="mt-2 text-sm leading-7 text-slate-600">
-              {selectedEvent.description}
+              {selectedEvent.content}
             </p>
           </div>
           {isGuardian && (
@@ -1262,9 +1339,26 @@ function CalendarView({
               진행해 주세요.
             </p>
           )}
+          {/* 쓰기는 본인만 할 수 있습니다. 보호자에게는 버튼을 아예 두지 않습니다. */}
+          {!isGuardian && (
+            <div className="mt-6 flex gap-2">
+              <button
+                onClick={() => void toggleDone(selectedEvent)}
+                className="flex-1 rounded-xl bg-emerald-50 py-3 font-black text-emerald-700"
+              >
+                {selectedEvent.status === "DONE" ? "예정으로 되돌리기" : "완료로 표시"}
+              </button>
+              <button
+                onClick={() => void removeSchedule(selectedEvent)}
+                className="rounded-xl px-5 font-black text-red-500"
+              >
+                삭제
+              </button>
+            </div>
+          )}
           <button
             onClick={() => setSelectedEvent(null)}
-            className="mt-6 w-full rounded-xl bg-slate-900 py-3 font-black text-white"
+            className="mt-3 w-full rounded-xl bg-slate-900 py-3 font-black text-white"
           >
             확인
           </button>
@@ -1274,12 +1368,11 @@ function CalendarView({
         <ScheduleForm
           initialDate={selectedDate}
           onClose={() => setAdding(false)}
-          onSave={(schedule) => {
-            setSchedules((value) => [schedule, ...value]);
+          onError={(message) => toast({ message })}
+          onSaved={(schedule) => {
             setSelectedDate(schedule.date);
             setVisibleMonth(new Date(`${schedule.date}T00:00:00`));
-            setAdding(false);
-            toast({ message: "일정이 캘린더에 등록되었어요.", tone: "green" });
+            void saveSchedule(schedule);
           }}
         />
       )}
@@ -1287,14 +1380,26 @@ function CalendarView({
   );
 }
 
+/**
+ * 일정 직접 등록.
+ *
+ * 시각은 <input type="time">이 주는 24시간제 "14:05" 그대로 서버에 보냅니다. 예전에는
+ * toKoreanTimeLabel로 "오후 2:05"를 만들어 저장했는데, 그러면 표시 문자열이 데이터가 되고
+ * 정렬과 비교를 할 때마다 다시 파싱해야 합니다.
+ *
+ * 종류는 PERSONAL로 고정합니다. 병원·복약·치료는 도담이 대화에서 알아내 붙이는 값이고,
+ * 사람이 직접 고르는 화면은 아직 없습니다.
+ */
 function ScheduleForm({
   initialDate,
   onClose,
-  onSave,
+  onSaved,
+  onError,
 }: {
   initialDate: string;
   onClose: () => void;
-  onSave: (schedule: ScheduleEvent) => void;
+  onSaved: (schedule: ApiSchedule) => void;
+  onError: (message: string) => void;
 }) {
   const [date, setDate] = useState(initialDate);
   const [time, setTime] = useState("09:00");
@@ -1302,22 +1407,31 @@ function ScheduleForm({
   const [description, setDescription] = useState("");
   const [location, setLocation] = useState("");
   const [error, setError] = useState("");
-  const save = (event: React.FormEvent) => {
+  const [pending, setPending] = useState(false);
+  const save = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!date || !time || !title.trim()) {
       setError("날짜, 시간과 일정 제목을 입력해 주세요.");
       return;
     }
-    onSave({
-      id: Date.now(),
+
+    setPending(true);
+    const result = await createSchedule({
       date,
-      time: toKoreanTimeLabel(time),
+      time,
       title: title.trim(),
-      type: "personal",
-      description: description.trim() || "직접 등록한 일정입니다.",
+      scheduleType: "PERSONAL",
+      content: description.trim() || "직접 등록한 일정입니다.",
       location: location.trim() || undefined,
-      status: "예정",
     });
+    setPending(false);
+
+    if (result.status !== "success" || !result.data) {
+      onError(errorMessage(result));
+      return;
+    }
+
+    onSaved(result.data);
   };
   const fieldClass =
     "h-12 w-full rounded-xl border-2 border-slate-200 px-4 font-bold outline-none focus:border-blue-500";
@@ -1327,7 +1441,7 @@ function ScheduleForm({
       <p className="mt-2 text-sm text-slate-500">
         기억할 일정을 캘린더에 직접 추가해 보세요.
       </p>
-      <form onSubmit={save} className="mt-6 space-y-4">
+      <form onSubmit={(event) => void save(event)} className="mt-6 space-y-4">
         <div className="grid grid-cols-2 gap-3">
           <label>
             <span className="mb-2 block text-sm font-black">날짜</span>
@@ -1392,7 +1506,10 @@ function ScheduleForm({
           >
             취소
           </button>
-          <button className="flex-1 rounded-xl bg-blue-600 py-3 font-black text-white">
+          <button
+            disabled={pending}
+            className="flex-1 rounded-xl bg-blue-600 py-3 font-black text-white disabled:bg-slate-300"
+          >
             일정 등록
           </button>
         </div>
@@ -1409,7 +1526,7 @@ function HomeView({
   go,
 }: {
   name: string;
-  notes: DailyNote[];
+  notes: ApiDiary[];
   chapterCount: number;
   notificationCount: number;
   go: (tab: ServiceTab) => void;
@@ -1523,7 +1640,7 @@ function HomeView({
               onClick={() => go("notes")}
               className="rounded-2xl bg-slate-50 p-5 text-left transition hover:-translate-y-1 hover:shadow-md"
             >
-              <p className="text-xs font-black text-blue-600">{note.date}</p>
+              <p className="text-xs font-black text-blue-600">{formatDate(note.date)}</p>
               <p className="mt-2 font-black">{note.title}</p>
               <p className="mt-2 line-clamp-2 text-sm leading-6 text-slate-500">
                 {note.content}
@@ -1589,154 +1706,259 @@ function FeatureCard({
   );
 }
 
+/**
+ * 도담과의 대화.
+ *
+ * 대화방과 메시지는 서버가 갖습니다(CHAT_ROOM / CHAT). 예전에는 ansimChatThreads localStorage에
+ * 있었고 답도 setTimeout으로 지어낸 문장이었습니다.
+ *
+ * 한 가지 규칙이 이 컴포넌트의 모양을 정합니다: <b>보낸 말은 어떤 실패에도 사라지지 않습니다.</b>
+ * 서버가 발화를 먼저 저장한 뒤 모델을 부르고, 실패 응답에도 data.sent를 실어 줍니다.
+ * 그래서 아래 send는 에러일 때도 sent를 화면에 붙이고 안내만 따로 띄웁니다.
+ */
 function ChatView({
-  messages,
-  setMessages,
-  onCreateNote,
+  userId,
+  userName,
+  toast,
+  onNoteCreated,
 }: {
-  messages: ChatMessage[];
-  setMessages: React.Dispatch<React.SetStateAction<ChatMessage[]>>;
-  onCreateNote: (note: DailyNote) => void;
+  userId: string;
+  userName: string;
+  toast: (toast: Toast) => void;
+  onNoteCreated: (note: ApiDiary) => void;
 }) {
   const [input, setInput] = useState("");
-  const [recording, setRecording] = useState(false);
-  const [seconds, setSeconds] = useState(0);
   const [saved, setSaved] = useState(false);
-  const [threads, setThreads] = useState<ChatThread[]>(() => {
-    const stored = loadStored<ChatThread[]>("ansimChatThreads", []);
-    return stored.length > 0
-      ? stored
-      : [
-          {
-            id: "initial",
-            title: "오늘의 대화",
-            createdAt: "7월 2일",
-            messages,
-          },
-        ];
-  });
-  const [activeThreadId, setActiveThreadId] = useState(() => {
-    const storedId = localStorage.getItem("ansimActiveChatThreadId");
-    return storedId && threads.some((thread) => thread.id === storedId)
-      ? storedId
-      : threads[0].id;
-  });
+  const [pending, setPending] = useState(false);
+  /** 녹음이 끝나고 서버가 글로 옮기는 동안. 마이크는 이미 닫혀 있습니다. */
+  const [transcribing, setTranscribing] = useState(false);
+  const [rooms, setRooms] = useState<ApiChatRoom[]>([]);
+  const [activeRoomId, setActiveRoomId] = useState<string | null>(null);
+  const [messages, setMessages] = useState<ApiMessage[]>([]);
   const bottomRef = useRef<HTMLDivElement>(null);
+
+  /**
+   * 이 배포에 음성이 켜져 있는지. 꺼져 있으면 버튼을 아예 그리지 않습니다 — 눌러도 늘 실패하는
+   * 버튼은 안내가 아니라 함정입니다.
+   */
+  const [speech, setSpeech] = useState({ stt: false, tts: false });
+
+  /** 도담의 답을 자동으로 읽어 줄지. 끄더라도 말풍선의 🔊 버튼은 그대로 남습니다. */
+  const voiceKey = `damso.voice.${userId}`;
+  const [voiceOn, setVoiceOn] = useState(() => loadStored(voiceKey, true));
+
+  const speaker = useSpeaker({
+    onError: (code) => toast({ message: messageOf(code) }),
+  });
+
+  /** 마이크가 열릴 때 스피커를 멈춥니다. 안 그러면 도담의 목소리를 그대로 받아 적습니다. */
+  const deniedRef = useRef(false);
+  const recorder = useVoiceRecorder({
+    onStart: speaker.stop,
+    onDenied: () => {
+      deniedRef.current = true;
+    },
+  });
+
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
-  useEffect(() => {
-    if (!recording) return;
-    const timer = window.setInterval(() => setSeconds((s) => s + 1), 1000);
-    return () => window.clearInterval(timer);
-  }, [recording]);
-  useEffect(() => {
-    // 현재 활성 스레드에 최신 messages를 반영해 로컬 스토리지 저장 대상과 동기화합니다.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setThreads((value) =>
-      value.map((thread) =>
-        thread.id === activeThreadId ? { ...thread, messages } : thread,
-      ),
-    );
-  }, [activeThreadId, messages]);
-  useEffect(
-    () => localStorage.setItem("ansimChatThreads", JSON.stringify(threads)),
-    [threads],
-  );
-  useEffect(
-    () => localStorage.setItem("ansimActiveChatThreadId", activeThreadId),
-    [activeThreadId],
-  );
 
-  const send = (text: string) => {
-    if (!text.trim()) return;
-    const now = new Date().toLocaleTimeString("ko-KR", {
-      hour: "numeric",
-      minute: "2-digit",
+  useEffect(() => localStorage.setItem(voiceKey, JSON.stringify(voiceOn)), [voiceKey, voiceOn]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    void fetchSpeechConfig().then((result) => {
+      if (cancelled || result.status !== "success" || !result.data) return;
+      setSpeech(result.data);
     });
-    setMessages((value) => [
-      ...value,
-      { id: Date.now(), role: "user", text: text.trim(), time: now },
-    ]);
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  /**
+   * 방 목록을 불러오고, 하나도 없으면 첫 방을 만들어 줍니다.
+   *
+   * 처음 들어온 사람에게 "새 대화" 버튼부터 누르게 하지 않기 위해서입니다 — 이 화면의
+   * 사용자는 빈 목록을 보면 무엇을 눌러야 할지 알기 어렵습니다.
+   */
+  useEffect(() => {
+    let cancelled = false;
+
+    void (async () => {
+      const result = await fetchChatRooms();
+      if (cancelled || result.status !== "success" || !result.data) return;
+
+      if (result.data.length === 0) {
+        const created = await createChatRoom("오늘의 대화");
+        if (cancelled || created.status !== "success" || !created.data) return;
+        setRooms([created.data]);
+        setActiveRoomId(created.data.id);
+        return;
+      }
+
+      setRooms(result.data);
+      setActiveRoomId((current) => current ?? result.data![0].id);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!activeRoomId) return;
+    let cancelled = false;
+
+    void fetchMessages(activeRoomId).then((result) => {
+      if (cancelled) return;
+      setMessages(result.status === "success" && result.data ? result.data : []);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeRoomId]);
+
+  const send = async (text: string) => {
+    if (!text.trim() || !activeRoomId || pending) return;
+
     setInput("");
-    window.setTimeout(
-      () =>
-        setMessages((value) => [
-          ...value,
-          {
-            id: Date.now() + 1,
-            role: "ai",
-            text: "그런 일이 있으셨군요. 말씀해 주셔서 고마워요. 그때 마음은 어떠셨는지, 몸이 불편한 곳은 없었는지도 들려주실래요?",
-            time: now,
-          },
-        ]),
-      550,
-    );
+    setPending(true);
+
+    const result = await say(activeRoomId, text.trim());
+
+    setPending(false);
+
+    // 성공이든 실패든 sent가 오면 화면에 붙입니다. 서버가 이미 저장한 말이라,
+    // 여기서 지우면 새로고침할 때 되살아나 더 이상해집니다.
+    const turn = result.data;
+    if (turn?.sent) {
+      setMessages((value) => [...value, turn.sent, ...(turn.reply ? [turn.reply] : [])]);
+    }
+
+    // 새 답변을 읽어 줍니다. 효과(useEffect)가 아니라 여기인 이유: 효과로 두면 방을 옮기거나
+    // 목록을 다시 불러 messages가 바뀔 때마다 "새 답변"인지 다시 따져야 하고, 한 번이라도 잘못
+    // 세면 예전 대화가 저절로 소리를 냅니다. 답이 도착한 자리는 여기 하나뿐입니다.
+    if (turn?.reply && voiceOn && speech.tts) {
+      void speaker.speak(turn.reply.id, turn.reply.message);
+    }
+
+    if (result.status !== "success") {
+      toast({ message: errorMessage(result) });
+      if (!turn?.sent) return;
+    }
+
+    // 방 목록의 미리보기와 정렬(최근 대화 순)이 바뀝니다.
+    void fetchChatRooms().then((rooms) => {
+      if (rooms.status === "success" && rooms.data) setRooms(rooms.data);
+    });
+    setSaved(false);
   };
-  const toggleRecording = () => {
-    if (recording) {
-      setRecording(false);
-      send(
-        "오늘 공원에서 오랜 친구를 만나 함께 산책했어. 기분이 참 좋았고 몸도 가벼웠어.",
-      );
+
+  /**
+   * 말한 것을 그대로 보냅니다.
+   *
+   * 녹음은 말이 끝나면(2초의 침묵) 스스로 멈춥니다. 버튼을 다시 눌러 끝낼 수도 있고, 60초에서는
+   * 어느 쪽이든 멈춥니다.
+   *
+   * 옮겨 적은 문장을 입력창에 넣어 확인시키지 않고 **바로 보냅니다.** 손을 덜 쓰는 쪽이 이 화면의
+   * 사용자에게 맞고, 잘못 들은 경우에는 다시 말씀하시면 됩니다 — 이미 보낸 말도 대화에 남지만
+   * 그것은 사람의 대화에서도 마찬가지입니다.
+   */
+  const toggleRecording = async () => {
+    if (recorder.recording) {
+      recorder.stop();
       return;
     }
-    setSeconds(0);
-    setRecording(true);
+
+    // 반드시 사용자 조작 안에서. 이 한 번이 있어야 나중에 도착하는 답을 자동으로 읽어 줄 수 있습니다.
+    speaker.unlock();
+
+    deniedRef.current = false;
+    const take = await recorder.start();
+    if (!take) {
+      // 마이크를 막은 것과 아무 말도 없었던 것은 다른 일이고, 사람이 해야 할 일도 다릅니다.
+      toast({ message: messageOf(deniedRef.current ? "MIC_DENIED" : "NO_SPEECH") });
+      return;
+    }
+
+    setTranscribing(true);
+    const result = await transcribe(take.blob);
+    setTranscribing(false);
+
+    if (result.status !== "success") {
+      toast({ message: errorMessage(result) });
+      return;
+    }
+
+    const text = (result.data ?? "").trim();
+    // 서버는 침묵을 빈 문자열로 답합니다. 실패가 아니라 다시 여쭙는 자리입니다.
+    if (!text) {
+      toast({ message: messageOf("NO_SPEECH") });
+      return;
+    }
+
+    void send(text);
   };
-  const createNote = () => {
-    const userStories = messages
-      .filter((m) => m.role === "user")
-      .map((m) => m.text);
-    const content = userStories.length
-      ? userStories.join(" ")
-      : "AI 파트너와 오늘 하루의 안부를 나누었다. 차분히 대화를 나누며 마음을 돌아본 시간이었다.";
-    onCreateNote({
-      id: Date.now(),
-      date: todayKorean(),
-      title: "오늘의 이야기",
-      content,
-      mood: "편안해요",
-      tags: ["AI 대화", "오늘", "기록"],
-      health: "대화 기반 분석 · 특이사항 없음",
-    });
+
+  /** 오늘 대화를 데일리노트 한 편으로 정리합니다. 글은 서버의 모델이 씁니다. */
+  const createNote = async () => {
+    if (pending) return;
+    setPending(true);
+
+    const result = await generateDiary(todayISO(), activeRoomId ?? undefined);
+
+    setPending(false);
+
+    if (result.status !== "success" || !result.data) {
+      toast({ message: errorMessage(result) });
+      return;
+    }
+
+    onNoteCreated(result.data);
     setSaved(true);
   };
-  const openThread = (thread: ChatThread) => {
-    setActiveThreadId(thread.id);
-    setMessages(thread.messages);
+
+  const openRoom = (room: ApiChatRoom) => {
+    setActiveRoomId(room.id);
     setSaved(false);
     setInput("");
   };
-  const createNewThread = () => {
-    const now = new Date();
-    const id = String(now.getTime());
-    const starterMessages: ChatMessage[] = [
-      {
-        id: now.getTime() + 1,
-        role: "ai",
-        text: "새로운 대화를 시작할게요. 순자님, 지금 가장 먼저 나누고 싶은 이야기는 무엇인가요?",
-        time: now.toLocaleTimeString("ko-KR", {
-          hour: "numeric",
-          minute: "2-digit",
-        }),
-      },
-    ];
-    const newThread: ChatThread = {
-      id,
-      title: `새 대화 ${threads.length + 1}`,
-      createdAt: now.toLocaleDateString("ko-KR", {
-        month: "long",
-        day: "numeric",
-      }),
-      messages: starterMessages,
-    };
-    setThreads((value) => [...value, newThread]);
-    setActiveThreadId(id);
-    setMessages(starterMessages);
+
+  const createNewRoom = async () => {
+    const result = await createChatRoom(`새 대화 ${rooms.length + 1}`);
+    if (result.status !== "success" || !result.data) {
+      toast({ message: errorMessage(result) });
+      return;
+    }
+
+    setRooms((value) => [result.data!, ...value]);
+    setActiveRoomId(result.data.id);
+    setMessages([]);
     setSaved(false);
     setInput("");
   };
+
+  const removeRoom = async (room: ApiChatRoom) => {
+    const result = await deleteChatRoom(room.id);
+    if (result.status !== "success") {
+      toast({ message: errorMessage(result) });
+      return;
+    }
+
+    const remaining = rooms.filter((item) => item.id !== room.id);
+    setRooms(remaining);
+    if (activeRoomId === room.id) {
+      setActiveRoomId(remaining[0]?.id ?? null);
+      setMessages([]);
+    }
+    toast({ message: "대화를 지웠어요.", tone: "green" });
+  };
+
   return (
     <div className="flex h-[calc(100vh-76px)] flex-col bg-white">
       <div className="border-b border-slate-200 px-4 py-4 sm:px-8">
@@ -1752,15 +1974,28 @@ function ChatView({
             </p>
           </div>
           <div className="ml-auto flex gap-2">
+            {speech.tts && (
+              <button
+                onClick={() => {
+                  const next = !voiceOn;
+                  setVoiceOn(next);
+                  if (!next) speaker.stop();
+                }}
+                aria-pressed={voiceOn}
+                className={`rounded-xl border px-3 py-2.5 text-xs font-black sm:px-4 sm:text-sm ${voiceOn ? "border-blue-200 bg-blue-50 text-blue-700" : "border-slate-200 bg-white text-slate-400"}`}
+              >
+                {voiceOn ? "🔊 음성 켜짐" : "🔇 음성 꺼짐"}
+              </button>
+            )}
             <button
-              onClick={createNewThread}
+              onClick={() => void createNewRoom()}
               className="rounded-xl border border-blue-200 bg-white px-3 py-2.5 text-xs font-black text-blue-700 hover:bg-blue-50 sm:px-4 sm:text-sm"
             >
               ＋ 새 대화
             </button>
             <button
-              onClick={createNote}
-              disabled={saved}
+              onClick={() => void createNote()}
+              disabled={saved || pending}
               className="rounded-xl bg-blue-50 px-3 py-2.5 text-xs font-black text-blue-700 disabled:bg-emerald-50 disabled:text-emerald-600 sm:px-4 sm:text-sm"
             >
               {saved ? "✓ 노트 저장 완료" : "대화내용 노트정리"}
@@ -1770,22 +2005,30 @@ function ChatView({
       </div>
       <div className="border-b border-slate-200 bg-white px-4 sm:px-8">
         <div className="mx-auto flex max-w-5xl gap-1 overflow-x-auto pt-2">
-          {threads.map((thread) => (
-            <button
-              key={thread.id}
-              onClick={() => openThread(thread)}
-              className={`group shrink-0 rounded-t-xl border-b-2 px-4 py-3 text-left transition ${activeThreadId === thread.id ? "border-blue-600 bg-blue-50 text-blue-700" : "border-transparent text-slate-400 hover:bg-slate-50"}`}
+          {rooms.map((room) => (
+            <span
+              key={room.id}
+              className={`group relative shrink-0 rounded-t-xl border-b-2 transition ${activeRoomId === room.id ? "border-blue-600 bg-blue-50 text-blue-700" : "border-transparent text-slate-400 hover:bg-slate-50"}`}
             >
-              <b className="block text-xs sm:text-sm">{thread.title}</b>
-              <span className="mt-0.5 block text-[10px] font-bold opacity-70">
-                {thread.createdAt} ·{" "}
-                {
-                  thread.messages.filter((message) => message.role === "user")
-                    .length
-                }
-                개 이야기
-              </span>
-            </button>
+              <button
+                onClick={() => openRoom(room)}
+                className="px-4 py-3 pr-8 text-left"
+              >
+                <b className="block text-xs sm:text-sm">{room.title}</b>
+                <span className="mt-0.5 block text-[10px] font-bold opacity-70">
+                  {formatMoment(room.updatedAt)} · {room.messageCount ?? 0}개 이야기
+                </span>
+              </button>
+              {rooms.length > 1 && (
+                <button
+                  onClick={() => void removeRoom(room)}
+                  aria-label={`${room.title} 삭제`}
+                  className="absolute right-2 top-2 hidden h-5 w-5 items-center justify-center rounded-full text-slate-400 hover:bg-white hover:text-red-500 group-hover:flex"
+                >
+                  ×
+                </button>
+              )}
+            </span>
           ))}
         </div>
       </div>
@@ -1796,30 +2039,62 @@ function ChatView({
               오늘
             </span>
           </div>
-          {messages.map((message) => (
-            <div
-              key={message.id}
-              className={`mb-5 flex ${message.role === "user" ? "justify-end" : "justify-start"}`}
-            >
-              {message.role === "ai" && (
-                <span className="mr-2 mt-1 flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-blue-100">
-                  🌼
-                </span>
-              )}
+          {messages.length === 0 && (
+            <p className="py-12 text-center text-sm text-slate-400">
+              {userName}님, 오늘 하루는 어떠셨어요? 천천히 들려주세요.
+            </p>
+          )}
+          {messages.map((message) => {
+            const mine = message.senderType === "USER";
+            return (
               <div
-                className={`max-w-[78%] sm:max-w-[65%] ${message.role === "user" ? "text-right" : ""}`}
+                key={message.id}
+                className={`mb-5 flex ${mine ? "justify-end" : "justify-start"}`}
               >
-                <div
-                  className={`inline-block rounded-2xl px-5 py-3 text-left text-sm font-medium leading-7 shadow-sm ${message.role === "user" ? "rounded-br-md bg-blue-600 text-white" : "rounded-bl-md border border-slate-100 bg-white text-slate-700"}`}
-                >
-                  {message.text}
+                {!mine && (
+                  <span className="mr-2 mt-1 flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-blue-100">
+                    🌼
+                  </span>
+                )}
+                <div className={`max-w-[78%] sm:max-w-[65%] ${mine ? "text-right" : ""}`}>
+                  <div
+                    className={`inline-block rounded-2xl px-5 py-3 text-left text-sm font-medium leading-7 shadow-sm ${mine ? "rounded-br-md bg-blue-600 text-white" : "rounded-bl-md border border-slate-100 bg-white text-slate-700"}`}
+                  >
+                    {message.message}
+                  </div>
+                  <p className="mt-1 flex items-center gap-2 text-[11px] text-slate-400">
+                    {formatTime(message.sentAt)}
+                    {/* 도담의 말만 읽어 줍니다. 어르신이 하신 말은 이미 그분이 아십니다. */}
+                    {!mine && speech.tts && (
+                      <button
+                        onClick={() => void speaker.speak(message.id, message.message)}
+                        aria-label={
+                          speaker.speakingId === message.id ? "읽기 멈춤" : "다시 듣기"
+                        }
+                        className="font-bold text-blue-600 hover:underline"
+                      >
+                        {speaker.speakingId === message.id
+                          ? "■ 멈춤"
+                          : speaker.loadingId === message.id
+                            ? "… 준비 중"
+                            : "🔊 다시 듣기"}
+                      </button>
+                    )}
+                  </p>
                 </div>
-                <p className="mt-1 text-[11px] text-slate-400">
-                  {message.time}
-                </p>
+              </div>
+            );
+          })}
+          {pending && (
+            <div className="mb-5 flex justify-start">
+              <span className="mr-2 mt-1 flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-blue-100">
+                🌼
+              </span>
+              <div className="inline-block rounded-2xl rounded-bl-md border border-slate-100 bg-white px-5 py-3 text-sm text-slate-400 shadow-sm">
+                도담이 생각하고 있어요…
               </div>
             </div>
-          ))}
+          )}
           <div ref={bottomRef} />
         </div>
       </div>
@@ -1830,7 +2105,7 @@ function ChatView({
               {quickPrompts.map((prompt) => (
                 <button
                   key={prompt}
-                  onClick={() => send(prompt)}
+                  onClick={() => void send(prompt)}
                   className="shrink-0 rounded-full border border-blue-200 bg-blue-50 px-4 py-2 text-xs font-bold text-blue-700"
                 >
                   {prompt}
@@ -1841,22 +2116,50 @@ function ChatView({
           <form
             onSubmit={(event) => {
               event.preventDefault();
-              send(input);
+              void send(input);
             }}
             className="flex items-end gap-2 rounded-2xl border-2 border-slate-200 bg-slate-50 p-2 focus-within:border-blue-400"
           >
-            <button
-              type="button"
-              onClick={toggleRecording}
-              className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-xl text-xl text-white ${recording ? "animate-pulse bg-red-500" : "bg-blue-600"}`}
-            >
-              {recording ? "■" : "●"}
-            </button>
+            {/* STT를 켜지 않은 배포와 마이크를 쓸 수 없는 브라우저(HTTPS가 아닌 주소 등)에서는
+                버튼 자체를 두지 않습니다. 글로 적는 길은 그대로 남아 있습니다. */}
+            {speech.stt && canRecordAudio() && (
+              <button
+                type="button"
+                onClick={() => void toggleRecording()}
+                disabled={transcribing || pending}
+                aria-label={recorder.recording ? "녹음 멈추기" : "말로 이야기하기"}
+                className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-xl text-xl text-white disabled:bg-slate-300 ${recorder.recording ? "animate-pulse bg-red-500" : "bg-blue-600"}`}
+              >
+                {recorder.recording ? "■" : "●"}
+              </button>
+            )}
             <div className="min-w-0 flex-1">
-              {recording && (
-                <p className="px-2 text-xs font-black text-red-500">
-                  음성을 듣고 있어요 · 00:{seconds.toString().padStart(2, "0")}
-                </p>
+              {recorder.recording && (
+                <div className="flex items-center gap-2 px-2">
+                  <p className="text-xs font-black text-red-500">
+                    {recorder.heard
+                      ? "듣고 있어요 · 말씀이 끝나면 자동으로 보내드려요"
+                      : "말씀해 주세요"}
+                    {" · "}
+                    {recorder.secondsLeft}초
+                  </p>
+                  {/* 소리가 들어오고 있다는 것을 눈으로도 보여 줍니다. 아무 반응이 없는 화면 앞에서는
+                      마이크가 고장 났는지 내 목소리가 작은지 알 길이 없습니다. */}
+                  <span className="flex h-4 items-end gap-0.5" aria-hidden>
+                    {[0, 1, 2, 3, 4].map((bar) => (
+                      <i
+                        key={bar}
+                        className="w-1 rounded-full bg-red-400"
+                        style={{
+                          height: `${Math.max(3, Math.min(16, recorder.level * 16 * (1 + (bar % 3) * 0.3)))}px`,
+                        }}
+                      />
+                    ))}
+                  </span>
+                </div>
+              )}
+              {transcribing && (
+                <p className="px-2 text-xs font-black text-blue-500">글로 옮기고 있어요…</p>
               )}
               <textarea
                 value={input}
@@ -1868,7 +2171,8 @@ function ChatView({
             </div>
             <button
               type="submit"
-              className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-slate-900 text-white"
+              disabled={pending || !activeRoomId}
+              className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-slate-900 text-white disabled:bg-slate-300"
             >
               ➤
             </button>
@@ -1882,115 +2186,148 @@ function ChatView({
   );
 }
 
+/**
+ * 데일리노트.
+ *
+ * <b>코멘트를 쓸 수 있는 사람은 연결된 보호자뿐입니다.</b> 노트 주인은 읽기만 합니다.
+ * 서버가 그렇게 막고 있어서(DiaryService.addComment) 어르신 화면에는 입력창 자체를 두지
+ * 않습니다 — 보여 주고 나서 거절하는 것은 화면이 규칙을 모르고 있다는 뜻입니다.
+ *
+ * 예전에는 readOnly에 따라 role을 'guardian' | 'user'로 정해 양쪽 다 쓸 수 있었습니다.
+ */
 function NotesView({
   notes,
   setNotes,
   toast,
   subjectName,
   readOnly = false,
-  authorName,
+  currentUserId,
   onNotify,
 }: {
-  notes: DailyNote[];
-  setNotes: React.Dispatch<React.SetStateAction<DailyNote[]>>;
+  notes: ApiDiary[];
+  setNotes: React.Dispatch<React.SetStateAction<ApiDiary[]>>;
   toast: (toast: Toast) => void;
   subjectName?: string;
   readOnly?: boolean;
-  authorName: string;
+  currentUserId: string;
   onNotify: (message: string, tab?: ServiceTab) => void;
 }) {
-  const [selected, setSelected] = useState<DailyNote | null>(null);
-  const [shareNote, setShareNote] = useState<DailyNote | null>(null);
+  const [selected, setSelected] = useState<ApiDiary | null>(null);
+  const [comments, setComments] = useState<ApiComment[]>([]);
+  const [shareNote, setShareNote] = useState<ApiDiary | null>(null);
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState<"all" | "가족" | "건강">("all");
   const [commentText, setCommentText] = useState("");
-  const [editingCommentId, setEditingCommentId] = useState<number | null>(null);
+  const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
   const [editingCommentText, setEditingCommentText] = useState("");
   const commentSubmittingRef = useRef(false);
-  const familyNoteCount = notes.filter((note) => note.tags.includes("가족")).length;
-  const healthNoteCount = notes.filter((note) => note.tags.includes("건강")).length;
+
+  /** 보호자만 코멘트를 남길 수 있습니다. 서버 규칙을 화면에 그대로 옮긴 것입니다. */
+  const canComment = readOnly;
+
+  const tagsOf = (note: ApiDiary) => note.tags ?? [];
+  const familyNoteCount = notes.filter((note) => tagsOf(note).includes("가족")).length;
+  const healthNoteCount = notes.filter((note) => tagsOf(note).includes("건강")).length;
   const filtered = notes.filter((note) => {
-    const matchesCategory = category === "all" || note.tags.includes(category);
-    const matchesQuery = `${note.title}${note.content}${note.tags.join("")}`.includes(
-      query,
-    );
+    const matchesCategory = category === "all" || tagsOf(note).includes(category);
+    const matchesQuery = `${note.title}${note.content}${tagsOf(note).join("")}`.includes(query);
     return matchesCategory && matchesQuery;
   });
-  const addComment = () => {
-    if (!selected || !commentText.trim() || commentSubmittingRef.current)
-      return;
-    commentSubmittingRef.current = true;
-    const comment: NoteComment = {
-      id: Date.now(),
-      author: authorName,
-      role: readOnly ? "guardian" : "user",
-      text: commentText.trim(),
-      createdAt: new Date().toLocaleString("ko-KR", {
-        month: "numeric",
-        day: "numeric",
-        hour: "numeric",
-        minute: "2-digit",
-      }),
-    };
-    const updated = {
-      ...selected,
-      comments: [...(selected.comments ?? []), comment],
-    };
-    setNotes((value) =>
-      value.map((note) => (note.id === selected.id ? updated : note)),
-    );
-    setSelected(updated);
+
+  /** 상세를 열면 코멘트를 함께 받습니다(서버가 info에 실어 줍니다). */
+  const openNote = async (note: ApiDiary) => {
+    setSelected(note);
+    setComments(note.comments ?? []);
     setCommentText("");
-    const target = readOnly ? (subjectName ?? "사용자") : "보호자";
-    onNotify(
-      `${authorName}님이 ‘${selected.title}’에 코멘트를 남겼어요.`,
-      "notes",
-    );
-    toast({ message: `${target}에게 코멘트 알림을 보냈어요.`, tone: "green" });
-    window.setTimeout(() => {
-      commentSubmittingRef.current = false;
-    }, 100);
+    setEditingCommentId(null);
+
+    const result = await fetchDiary(note.id);
+    if (result.status === "success" && result.data) {
+      setSelected(result.data);
+      setComments(result.data.comments ?? []);
+    }
   };
-  const updateComment = (commentId: number) => {
-    if (!selected || !editingCommentText.trim()) return;
-    const updated = {
-      ...selected,
-      comments: (selected.comments ?? []).map((comment) =>
-        comment.id === commentId
-          ? {
-              ...comment,
-              text: editingCommentText.trim(),
-              createdAt: `${comment.createdAt.replace(" · 수정됨", "")} · 수정됨`,
-            }
-          : comment,
-      ),
-    };
+
+  const refreshComments = async (diaryId: string) => {
+    const result = await fetchComments(diaryId);
+    const next = result.status === "success" && result.data ? result.data : [];
+    setComments(next);
+    // 목록 카드에 보이는 개수도 맞춰 둡니다. 다시 불러오지 않아도 되도록.
     setNotes((value) =>
-      value.map((note) => (note.id === selected.id ? updated : note)),
+      value.map((note) =>
+        note.id === diaryId ? { ...note, commentCount: next.length } : note,
+      ),
     );
-    setSelected(updated);
+  };
+
+  const addComment = async () => {
+    if (!selected || !commentText.trim() || commentSubmittingRef.current) return;
+    commentSubmittingRef.current = true;
+
+    const result = await createComment(selected.id, commentText.trim());
+
+    commentSubmittingRef.current = false;
+
+    if (result.status !== "success") {
+      toast({ message: errorMessage(result) });
+      return;
+    }
+
+    setCommentText("");
+    await refreshComments(selected.id);
+    onNotify(`‘${selected.title}’에 코멘트를 남겼어요.`, "notes");
+    toast({
+      message: `${subjectName ?? "사용자"}에게 코멘트 알림을 보냈어요.`,
+      tone: "green",
+    });
+  };
+
+  const editComment = async (commentId: string) => {
+    if (!selected || !editingCommentText.trim()) return;
+
+    const result = await updateComment(commentId, editingCommentText.trim());
+    if (result.status !== "success") {
+      toast({ message: errorMessage(result) });
+      return;
+    }
+
     setEditingCommentId(null);
     setEditingCommentText("");
+    await refreshComments(selected.id);
     toast({ message: "코멘트를 수정했어요.", tone: "green" });
   };
-  const deleteComment = (commentId: number) => {
+
+  const removeComment = async (commentId: string) => {
     if (!selected || !window.confirm("이 코멘트를 삭제할까요?")) return;
-    const updated = {
-      ...selected,
-      comments: (selected.comments ?? []).filter(
-        (comment) => comment.id !== commentId,
-      ),
-    };
-    setNotes((value) =>
-      value.map((note) => (note.id === selected.id ? updated : note)),
-    );
-    setSelected(updated);
+
+    const result = await deleteComment(commentId);
+    if (result.status !== "success") {
+      toast({ message: errorMessage(result) });
+      return;
+    }
+
     if (editingCommentId === commentId) {
       setEditingCommentId(null);
       setEditingCommentText("");
     }
+    await refreshComments(selected.id);
     toast({ message: "코멘트를 삭제했어요.", tone: "green" });
   };
+
+  const removeNote = async (note: ApiDiary) => {
+    if (!window.confirm("이 노트를 삭제할까요?")) return;
+
+    const result = await deleteDiary(note.id);
+    if (result.status !== "success") {
+      toast({ message: errorMessage(result) });
+      return;
+    }
+
+    setNotes((value) => value.filter((item) => item.id !== note.id));
+    setSelected(null);
+    toast({ message: "노트를 삭제했어요.", tone: "green" });
+  };
+
   return (
     <Page
       eyebrow={readOnly ? "피보호인 하루 기록" : "나의 하루 기록"}
@@ -1998,7 +2335,7 @@ function NotesView({
       description={
         readOnly
           ? "피보호인의 하루를 확인하고 따뜻한 코멘트와 알림을 남겨보세요."
-          : "하루 기록을 살펴보고 연결된 보호자와 코멘트를 나눠보세요."
+          : "하루 기록을 살펴보고, 연결된 보호자가 남긴 코멘트를 읽어보세요."
       }
       action={
         <div className="relative">
@@ -2064,22 +2401,24 @@ function NotesView({
             >
               <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
                 <div className="flex h-16 w-16 shrink-0 flex-col items-center justify-center rounded-2xl bg-blue-50 text-blue-700">
-                  <b className="text-xl">
-                    {note.date.match(/\d{2}(?=\.)/g)?.at(-1)}
-                  </b>
-                  <span className="text-[10px] font-black">JUL</span>
+                  <b className="text-xl">{note.date?.slice(8, 10) ?? "–"}</b>
+                  <span className="text-[10px] font-black">
+                    {note.date ? `${Number(note.date.slice(5, 7))}월` : ""}
+                  </span>
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-2">
                     <p className="text-xs font-black text-slate-400">
-                      {note.date}
+                      {formatDate(note.date)}
                     </p>
-                    <span className="rounded-full bg-emerald-50 px-2 py-1 text-[10px] font-black text-emerald-600">
-                      {note.mood}
-                    </span>
-                    {(note.comments?.length ?? 0) > 0 && (
+                    {note.mood && (
+                      <span className="rounded-full bg-emerald-50 px-2 py-1 text-[10px] font-black text-emerald-600">
+                        {note.mood}
+                      </span>
+                    )}
+                    {(note.commentCount ?? 0) > 0 && (
                       <span className="rounded-full bg-blue-50 px-2 py-1 text-[10px] font-black text-blue-600">
-                        코멘트 {note.comments?.length}
+                        코멘트 {note.commentCount}
                       </span>
                     )}
                   </div>
@@ -2088,7 +2427,7 @@ function NotesView({
                     {note.content}
                   </p>
                   <div className="mt-4 flex flex-wrap gap-2">
-                    {note.tags.map((tag) => (
+                    {tagsOf(note).map((tag) => (
                       <span
                         key={tag}
                         className="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-500"
@@ -2100,13 +2439,10 @@ function NotesView({
                 </div>
                 <div className="flex shrink-0 gap-2 sm:flex-col">
                   <button
-                    onClick={() => {
-                      setSelected(note);
-                      setCommentText("");
-                    }}
+                    onClick={() => void openNote(note)}
                     className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-black text-slate-600 hover:border-blue-300 hover:text-blue-600"
                   >
-                    읽기·코멘트
+                    {canComment ? "읽기·코멘트" : "자세히 보기"}
                   </button>
                   <button
                     onClick={() => setShareNote(note)}
@@ -2114,6 +2450,14 @@ function NotesView({
                   >
                     가족 알림
                   </button>
+                  {!readOnly && (
+                    <button
+                      onClick={() => void removeNote(note)}
+                      className="rounded-xl px-4 py-2 text-sm font-black text-slate-400 hover:text-red-500"
+                    >
+                      삭제
+                    </button>
+                  )}
                 </div>
               </div>
             </article>
@@ -2127,55 +2471,59 @@ function NotesView({
       </div>
       {selected && (
         <Modal onClose={() => setSelected(null)}>
-          <p className="text-sm font-black text-blue-600">{selected.date}</p>
+          <p className="text-sm font-black text-blue-600">{formatDate(selected.date)}</p>
           <h2 className="mt-2 text-2xl font-black">{selected.title}</h2>
           <p className="mt-6 whitespace-pre-line text-base leading-8 text-slate-600">
             {selected.content}
           </p>
-          <div className="mt-6 rounded-2xl bg-emerald-50 p-4 text-sm font-bold text-emerald-700">
-            ♡ 건강 메모 · {selected.health}
-          </div>
+          {selected.health && (
+            <div className="mt-6 rounded-2xl bg-emerald-50 p-4 text-sm font-bold text-emerald-700">
+              ♡ 건강 메모 · {selected.health}
+            </div>
+          )}
           <section className="mt-6 border-t border-slate-100 pt-5">
             <div className="flex items-center justify-between">
               <h3 className="font-black">가족 코멘트</h3>
               <span className="text-xs font-bold text-slate-400">
-                {selected.comments?.length ?? 0}개
+                {comments.length}개
               </span>
             </div>
             <div className="mt-3 max-h-48 space-y-3 overflow-y-auto">
-              {selected.comments?.map((comment) => {
-                const canManage =
-                  comment.role === (readOnly ? "guardian" : "user") &&
-                  comment.author === authorName;
+              {comments.map((comment) => {
+                const isGuardianComment = comment.authorRoles === "GUARDIAN";
+                // 수정은 작성자 본인만. 삭제는 서버가 노트 주인에게도 허용하지만, 화면에서는
+                // 작성자에게만 보여 줍니다 — 남의 말을 지우는 버튼을 굳이 눈에 띄게 둘 이유가 없습니다.
+                const canManage = comment.authorId === currentUserId;
                 return (
                   <div
                     key={comment.id}
-                    className={`rounded-2xl p-4 ${comment.role === "guardian" ? "bg-blue-50" : "bg-amber-50"}`}
+                    className={`rounded-2xl p-4 ${isGuardianComment ? "bg-blue-50" : "bg-amber-50"}`}
                   >
                     <div className="flex items-start justify-between gap-3">
                       <b className="text-sm">
-                        {comment.author}{" "}
+                        {comment.authorName}{" "}
                         <span className="ml-1 text-[10px] text-slate-400">
-                          {comment.role === "guardian" ? "보호자" : "사용자"}
+                          {isGuardianComment ? "보호자" : "사용자"}
                         </span>
                       </b>
                       <div className="flex shrink-0 items-center gap-2">
                         <span className="text-[10px] text-slate-400">
-                          {comment.createdAt}
+                          {formatMoment(comment.createdAt)}
+                          {comment.updatedAt > comment.createdAt && " · 수정됨"}
                         </span>
                         {canManage && (
                           <>
                             <button
                               onClick={() => {
                                 setEditingCommentId(comment.id);
-                                setEditingCommentText(comment.text);
+                                setEditingCommentText(comment.content);
                               }}
                               className="text-[11px] font-black text-blue-600"
                             >
                               수정
                             </button>
                             <button
-                              onClick={() => deleteComment(comment.id)}
+                              onClick={() => void removeComment(comment.id)}
                               className="text-[11px] font-black text-red-500"
                             >
                               삭제
@@ -2194,7 +2542,7 @@ function NotesView({
                           className="h-10 min-w-0 flex-1 rounded-lg border-2 border-blue-200 bg-white px-3 text-sm outline-none focus:border-blue-500"
                         />
                         <button
-                          onClick={() => updateComment(comment.id)}
+                          onClick={() => void editComment(comment.id)}
                           disabled={!editingCommentText.trim()}
                           className="rounded-lg bg-blue-600 px-3 text-xs font-black text-white disabled:bg-slate-300"
                         >
@@ -2212,51 +2560,60 @@ function NotesView({
                       </div>
                     ) : (
                       <p className="mt-2 text-sm leading-6 text-slate-600">
-                        {comment.text}
+                        {comment.content}
                       </p>
                     )}
                   </div>
                 );
               })}
-              {!selected.comments?.length && (
+              {comments.length === 0 && (
                 <p className="rounded-xl bg-slate-50 py-5 text-center text-sm text-slate-400">
-                  첫 코멘트를 남겨보세요.
+                  {canComment
+                    ? "첫 코멘트를 남겨보세요."
+                    : "아직 보호자가 남긴 코멘트가 없어요."}
                 </p>
               )}
             </div>
-            <div className="mt-4 flex gap-2">
-              <input
-                value={commentText}
-                onChange={(e) => setCommentText(e.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key !== "Enter") return;
-                  if (
-                    event.nativeEvent.isComposing ||
-                    event.nativeEvent.keyCode === 229
-                  )
-                    return;
-                  event.preventDefault();
-                  addComment();
-                }}
-                placeholder={
-                  readOnly
-                    ? "피보호인에게 따뜻한 말을 남겨주세요"
-                    : "보호자에게 전할 말을 남겨주세요"
-                }
-                className="h-12 min-w-0 flex-1 rounded-xl border-2 border-slate-200 px-4 text-sm font-bold outline-none focus:border-blue-500"
-              />
-              <button
-                onClick={addComment}
-                disabled={!commentText.trim()}
-                className="rounded-xl bg-blue-600 px-4 text-sm font-black text-white disabled:bg-slate-300"
-              >
-                코멘트 등록
-              </button>
-            </div>
-            <p className="mt-2 text-xs font-bold text-blue-600">
-              등록하면 연결된 {readOnly ? "사용자" : "보호자"}에게 알림이
-              전달됩니다.
-            </p>
+            {/*
+              입력창은 보호자에게만 보여 줍니다. 서버가 노트 주인의 코멘트를 거절하므로,
+              어르신에게 입력창을 보여 주는 것은 눌렀을 때 거절당할 버튼을 보여 주는 일입니다.
+            */}
+            {canComment ? (
+              <>
+                <div className="mt-4 flex gap-2">
+                  <input
+                    value={commentText}
+                    onChange={(e) => setCommentText(e.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key !== "Enter") return;
+                      if (
+                        event.nativeEvent.isComposing ||
+                        event.nativeEvent.keyCode === 229
+                      )
+                        return;
+                      event.preventDefault();
+                      void addComment();
+                    }}
+                    placeholder="피보호인에게 따뜻한 말을 남겨주세요"
+                    className="h-12 min-w-0 flex-1 rounded-xl border-2 border-slate-200 px-4 text-sm font-bold outline-none focus:border-blue-500"
+                  />
+                  <button
+                    onClick={() => void addComment()}
+                    disabled={!commentText.trim()}
+                    className="rounded-xl bg-blue-600 px-4 text-sm font-black text-white disabled:bg-slate-300"
+                  >
+                    코멘트 등록
+                  </button>
+                </div>
+                <p className="mt-2 text-xs font-bold text-blue-600">
+                  등록하면 연결된 사용자에게 알림이 전달됩니다.
+                </p>
+              </>
+            ) : (
+              <p className="mt-4 rounded-xl bg-slate-50 p-4 text-xs font-bold text-slate-500">
+                코멘트는 연결된 보호자가 남길 수 있어요. 남겨 주신 말은 여기에 보입니다.
+              </p>
+            )}
           </section>
           <div className="mt-6 flex gap-2">
             <button
@@ -2267,14 +2624,7 @@ function NotesView({
             </button>
             {!readOnly && (
               <button
-                onClick={() => {
-                  if (window.confirm("이 기록을 삭제할까요?")) {
-                    setNotes((value) =>
-                      value.filter((n) => n.id !== selected.id),
-                    );
-                    setSelected(null);
-                  }
-                }}
+                onClick={() => void removeNote(selected)}
                 className="rounded-xl px-5 font-black text-red-500"
               >
                 삭제
@@ -2287,7 +2637,7 @@ function NotesView({
         <FamilyShareModal
           type="데일리노트"
           title={shareNote.title}
-          summary={`${shareNote.mood} · ${shareNote.health}`}
+          summary={[shareNote.mood, shareNote.health].filter(Boolean).join(" · ")}
           onClose={() => setShareNote(null)}
           onSent={(names) => {
             setShareNote(null);
@@ -2306,45 +2656,89 @@ function BiographyView({
   chapters,
   setChapters,
   noteCount,
+  readOnly = false,
+  ownerName,
   toast,
 }: {
-  chapters: BiographyChapter[];
-  setChapters: React.Dispatch<React.SetStateAction<BiographyChapter[]>>;
+  chapters: ApiAutobiography[];
+  setChapters: React.Dispatch<React.SetStateAction<ApiAutobiography[]>>;
   noteCount: number;
+  readOnly?: boolean;
+  ownerName: string;
   toast: (toast: Toast) => void;
 }) {
-  const [selected, setSelected] = useState<BiographyChapter | null>(null);
-  const generate = () => {
-    const exists = chapters.some((c) => c.id === 4);
-    if (!exists)
-      setChapters((value) => [
-        ...value,
-        {
-          id: 4,
-          title: "4장 · 다시 피어나는 나의 계절",
-          period: "2006 — 오늘",
-          summary:
-            "데일리노트 속 가족과 친구, 평범해서 더 소중했던 오늘의 순간들을 한 편의 이야기로 엮었습니다.",
-          status: "작성 중",
-        },
-      ]);
+  const [selected, setSelected] = useState<ApiAutobiography | null>(null);
+  const [pending, setPending] = useState(false);
+
+  /**
+   * 쌓인 데일리노트로 새 장을 씁니다. 글은 서버의 모델이 쓰고, 언제나 '작성 중'으로 저장됩니다 —
+   * 다 됐는지는 그 삶을 산 사람이 읽고 정합니다.
+   */
+  const generate = async () => {
+    if (pending) return;
+    setPending(true);
+
+    const result = await generateAutobiography();
+
+    setPending(false);
+
+    if (result.status !== "success" || !result.data) {
+      toast({ message: errorMessage(result) });
+      return;
+    }
+
+    setChapters((value) => [...value, result.data!]);
+    toast({ message: "최근 기록을 바탕으로 새 장을 만들었어요.", tone: "green" });
+  };
+
+  const markDone = async (chapter: ApiAutobiography) => {
+    const next = chapter.status === "DONE" ? "DRAFT" : "DONE";
+    const result = await updateAutobiography(chapter.id, { status: next });
+    if (result.status !== "success") {
+      toast({ message: errorMessage(result) });
+      return;
+    }
+
+    setChapters((value) =>
+      value.map((item) => (item.id === chapter.id ? { ...item, status: next } : item)),
+    );
+    setSelected((current) => (current ? { ...current, status: next } : current));
     toast({
-      message: "최근 기록을 바탕으로 새 장을 만들었어요.",
+      message: next === "DONE" ? "완성으로 표시했어요." : "작성 중으로 되돌렸어요.",
       tone: "green",
     });
   };
+
+  const removeChapter = async (chapter: ApiAutobiography) => {
+    if (!window.confirm("이 장을 삭제할까요?")) return;
+
+    const result = await deleteAutobiographyRequest(chapter.id);
+    if (result.status !== "success") {
+      toast({ message: errorMessage(result) });
+      return;
+    }
+
+    setChapters((value) => value.filter((item) => item.id !== chapter.id));
+    setSelected(null);
+    toast({ message: "장을 삭제했어요.", tone: "green" });
+  };
+
   return (
     <Page
       eyebrow="나의 삶, 한 권의 책"
-      title="나의 자서전"
+      title={readOnly ? `${ownerName}님의 자서전` : "나의 자서전"}
       description="쌓인 데일리노트를 AI가 시대와 주제별로 엮어 인생 이야기로 만들어요."
       action={
-        <button
-          onClick={generate}
-          className="rounded-xl bg-blue-600 px-5 py-3 text-sm font-black text-white shadow-lg shadow-blue-200"
-        >
-          ✦ 새 이야기 만들기
-        </button>
+        // 남의 인생 이야기를 보호자가 대신 쓰게 두지 않습니다. 서버도 본인만 허용합니다.
+        readOnly ? undefined : (
+          <button
+            onClick={() => void generate()}
+            disabled={pending}
+            className="rounded-xl bg-blue-600 px-5 py-3 text-sm font-black text-white shadow-lg shadow-blue-200 disabled:bg-slate-300"
+          >
+            {pending ? "쓰는 중이에요…" : "✦ 새 이야기 만들기"}
+          </button>
+        )
       }
     >
       <section className="overflow-hidden rounded-[2rem] bg-gradient-to-br from-[#272343] to-[#493e78] p-7 text-white shadow-xl sm:p-10">
@@ -2354,11 +2748,11 @@ function BiographyView({
               AI 자서전 프로젝트
             </span>
             <h2 className="mt-6 text-3xl font-black sm:text-4xl">
-              김순자의 인생 이야기
+              {ownerName}의 인생 이야기
             </h2>
             <p className="mt-4 max-w-xl leading-7 text-violet-100">
-              바닷가 작은 마을에서 시작해 가족이라는 숲을 이루기까지. 평범한
-              날들 속 반짝이는 순간을 오래도록 간직합니다.
+              하루하루 남긴 기록이 모여 한 권이 됩니다. 평범해서 더 소중했던
+              날들을 오래도록 간직합니다.
             </p>
             <div className="mt-7 flex gap-7">
               <div>
@@ -2379,7 +2773,7 @@ function BiographyView({
               <br />
               모든 날
             </p>
-            <p className="mt-8 text-xs">김순자</p>
+            <p className="mt-8 text-xs">{ownerName}</p>
           </div>
         </div>
       </section>
@@ -2391,28 +2785,34 @@ function BiographyView({
           </span>
         </div>
         <div className="space-y-4">
-          {chapters.map((chapter) => (
+          {chapters.length === 0 && (
+            <p className="rounded-2xl border border-dashed border-slate-300 bg-white py-12 text-center text-sm text-slate-400">
+              아직 쓰인 장이 없어요. 데일리노트가 세 편 이상 쌓이면 이야기를 엮을 수 있어요.
+            </p>
+          )}
+          {chapters.map((chapter, index) => (
             <button
               key={chapter.id}
               onClick={() => setSelected(chapter)}
               className="flex w-full items-center gap-5 rounded-2xl border border-slate-200 bg-white p-5 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
             >
+              {/* 서버 ID는 정렬용 번호가 아닙니다. 목차 번호는 화면에서 매깁니다. */}
               <span className="hidden h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-violet-50 text-2xl text-violet-600 sm:flex">
-                {chapter.id}
+                {index + 1}
               </span>
               <span className="min-w-0 flex-1">
                 <span className="text-xs font-black text-violet-500">
-                  {chapter.period}
+                  {chapter.period ?? "시기 미정"}
                 </span>
                 <b className="mt-1 block text-lg">{chapter.title}</b>
                 <span className="mt-1 line-clamp-1 text-sm text-slate-500">
-                  {chapter.summary}
+                  {chapter.summary ?? chapter.content}
                 </span>
               </span>
               <span
-                className={`shrink-0 rounded-full px-3 py-1 text-xs font-black ${chapter.status === "완성" ? "bg-emerald-50 text-emerald-600" : "bg-amber-50 text-amber-600"}`}
+                className={`shrink-0 rounded-full px-3 py-1 text-xs font-black ${chapter.status === "DONE" ? "bg-emerald-50 text-emerald-600" : "bg-amber-50 text-amber-600"}`}
               >
-                {chapter.status}
+                {autobiographyStatusLabel(chapter.status)}
               </span>
               <span className="text-xl text-slate-300">›</span>
             </button>
@@ -2421,19 +2821,31 @@ function BiographyView({
       </div>
       {selected && (
         <Modal onClose={() => setSelected(null)}>
-          <p className="font-black text-violet-600">{selected.period}</p>
+          <p className="font-black text-violet-600">{selected.period ?? "시기 미정"}</p>
           <h2 className="mt-2 text-2xl font-black">{selected.title}</h2>
-          <div className="mt-6 rounded-2xl bg-[#fbf8f1] p-6 font-serif text-base leading-8 text-slate-700">
-            <p>{selected.summary}</p>
-            <p className="mt-4">
-              그 시절의 바람과 사람들의 웃음소리는 오랜 시간이 흐른 지금도 마음
-              한편에 선명하다. 나의 하루들은 그렇게 서로 이어져 한 사람의 삶이
-              되었다.
-            </p>
+          {/* 본문을 그대로 보여 줍니다. 예전에는 요약 아래에 고정된 문단이 붙어 있었습니다. */}
+          <div className="mt-6 whitespace-pre-line rounded-2xl bg-[#fbf8f1] p-6 font-serif text-base leading-8 text-slate-700">
+            {selected.content}
           </div>
+          {!readOnly && (
+            <div className="mt-6 flex gap-2">
+              <button
+                onClick={() => void markDone(selected)}
+                className="flex-1 rounded-xl bg-emerald-50 py-3 font-black text-emerald-700"
+              >
+                {selected.status === "DONE" ? "작성 중으로 되돌리기" : "완성으로 표시"}
+              </button>
+              <button
+                onClick={() => void removeChapter(selected)}
+                className="rounded-xl px-5 font-black text-red-500"
+              >
+                삭제
+              </button>
+            </div>
+          )}
           <button
             onClick={() => setSelected(null)}
-            className="mt-6 w-full rounded-xl bg-slate-900 py-3 font-black text-white"
+            className="mt-3 w-full rounded-xl bg-slate-900 py-3 font-black text-white"
           >
             책 덮기
           </button>
@@ -3121,6 +3533,8 @@ function CareRow({
 
 function MyPage({
   session,
+  links,
+  reloadLinks,
   saveProfile,
   go,
   toast,
@@ -3128,6 +3542,8 @@ function MyPage({
   setNotificationsEnabled,
 }: {
   session: Session;
+  links: ApiLink[];
+  reloadLinks: () => Promise<void>;
   saveProfile: (session: Session) => void;
   go: (tab: ServiceTab) => void;
   toast: (toast: Toast) => void;
@@ -3135,6 +3551,10 @@ function MyPage({
   setNotificationsEnabled: (value: boolean) => void;
 }) {
   const navigate = useNavigate();
+  const isGuardianAccount = session.accountType === "guardian";
+  // 보호자에게는 연결된 피보호인이, 어르신에게는 연결된 보호자들이 담깁니다.
+  const linkedWard = isGuardianAccount ? links[0] : undefined;
+  const linkedName = linkedWard?.wardName;
   const [form, setForm] = useState(session);
   const [edit, setEdit] = useState(false);
   const [withdraw, setWithdraw] = useState(false);
@@ -3174,20 +3594,25 @@ function MyPage({
     navigate("/");
   };
 
-  const completeParentLink = (parent: ParentLink) => {
-    // USER_LINK API가 없어 아직 브라우저에 남습니다. 서버로 옮기면 이 호출이 API로 바뀝니다.
-    saveParentLink(session.id, {
-      ...parent,
-      address: "",
-      consentAt: new Date().toISOString(),
-    });
-    void saveProfile({
-      ...session,
-      parentName: parent.name,
-      parentPhone: parent.phone,
-      parentRelation: parent.relation,
-    });
+  /** 연결이 만들어지면 목록만 다시 받습니다. 연결 정보는 이제 서버가 갖습니다. */
+  const completeParentLink = async () => {
     setLinkParentOpen(false);
+    await reloadLinks();
+    toast({ message: "피보호인 계정을 연결했어요.", tone: "green" });
+  };
+
+  const unlinkWard = async () => {
+    if (!linkedWard?.wardId) return;
+    if (!window.confirm(`${linkedWard.wardName} 님과의 연결을 해제할까요?`)) return;
+
+    const result = await deleteLink({ wardId: linkedWard.wardId });
+    if (result.status !== "success") {
+      toast({ message: errorMessage(result) });
+      return;
+    }
+
+    await reloadLinks();
+    toast({ message: "연결을 해제했어요.", tone: "green" });
   };
   return (
     <Page
@@ -3203,17 +3628,17 @@ function MyPage({
           <h2 className="mt-4 text-2xl font-black">{session.name} 님</h2>
           <p className="mt-1 text-sm text-slate-400">
             {session.accountType === "guardian"
-              ? session.parentName
-                ? `${session.parentName}님의 보호자`
+              ? linkedName
+                ? `${linkedName}님의 보호자`
                 : "피보호인 계정 미연동"
               : "담소와 함께한 지 128일"}
           </p>
           <span
-            className={`mt-4 inline-flex rounded-full px-3 py-1 text-xs font-black ${session.accountType === "guardian" && !session.parentName ? "bg-amber-50 text-amber-700" : "bg-emerald-50 text-emerald-600"}`}
+            className={`mt-4 inline-flex rounded-full px-3 py-1 text-xs font-black ${isGuardianAccount && !linkedName ? "bg-amber-50 text-amber-700" : "bg-emerald-50 text-emerald-600"}`}
           >
             ●{" "}
             {session.accountType === "guardian"
-              ? session.parentName
+              ? linkedName
                 ? "보호자 계정 · 연결 완료"
                 : "보호자 계정 · 연결 필요"
               : "본인인증 완료"}
@@ -3221,7 +3646,7 @@ function MyPage({
           <div className="mt-6 grid grid-cols-3 border-t border-slate-100 pt-5">
             <MiniStat
               value={
-                session.parentName || session.accountType !== "guardian"
+                linkedName || !isGuardianAccount
                   ? "24"
                   : "-"
               }
@@ -3229,7 +3654,7 @@ function MyPage({
             />
             <MiniStat
               value={
-                session.parentName || session.accountType !== "guardian"
+                linkedName || !isGuardianAccount
                   ? "18"
                   : "-"
               }
@@ -3237,7 +3662,7 @@ function MyPage({
             />
             <MiniStat
               value={
-                session.parentName || session.accountType !== "guardian"
+                linkedName || !isGuardianAccount
                   ? "3"
                   : "-"
               }
@@ -3301,7 +3726,7 @@ function MyPage({
               )}
             </form>
           </div>
-          {session.accountType === "guardian" && session.parentName && (
+          {isGuardianAccount && linkedName && (
             <div className="rounded-[1.5rem] border border-blue-200 bg-blue-50 p-6 shadow-sm">
               <div className="flex items-center gap-4">
                 <span className="flex h-14 w-14 items-center justify-center rounded-full bg-white text-2xl shadow-sm">
@@ -3312,12 +3737,12 @@ function MyPage({
                     연결된 피보호인
                   </p>
                   <h2 className="mt-1 text-xl font-black">
-                    {session.parentName} 님
+                    {linkedWard?.wardName} 님
                   </h2>
                   <p className="mt-1 text-sm text-slate-500">
-                    {session.parentRelation || "가족"} ·{" "}
-                    {session.parentPhone
-                      ? `${session.parentPhone.slice(0, 3)}-${session.parentPhone.slice(3, 7)}-${session.parentPhone.slice(7)}`
+                    {linkedWard?.relation || "가족"} ·{" "}
+                    {linkedWard?.wardPhone
+                      ? `${linkedWard.wardPhone.slice(0, 3)}-${linkedWard.wardPhone.slice(3, 7)}-${linkedWard.wardPhone.slice(7)}`
                       : "연락처 등록 완료"}
                   </p>
                 </div>
@@ -3339,9 +3764,15 @@ function MyPage({
                   건강 리포트 보기
                 </button>
               </div>
+              <button
+                onClick={() => void unlinkWard()}
+                className="mt-3 w-full rounded-xl py-2 text-xs font-black text-slate-400 hover:text-red-500"
+              >
+                연결 해제하기
+              </button>
             </div>
           )}
-          {session.accountType === "guardian" && !session.parentName && (
+          {isGuardianAccount && !linkedName && (
             <div className="rounded-[1.5rem] border-2 border-dashed border-blue-300 bg-blue-50 p-7 text-center shadow-sm">
               <span className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-white text-3xl shadow-sm">
                 🔗
@@ -3361,7 +3792,7 @@ function MyPage({
               </button>
             </div>
           )}
-          {(session.accountType !== "guardian" || session.parentName) && (
+          {(!isGuardianAccount || linkedName) && (
             <div className="rounded-[1.5rem] border border-slate-200 bg-white p-6 shadow-sm">
               <h2 className="text-xl font-black">
                 {session.accountType === "guardian"
@@ -3501,13 +3932,14 @@ function MyPage({
       {linkParentOpen && (
         <ParentLinkModal
           onClose={() => setLinkParentOpen(false)}
-          onLinked={completeParentLink}
+          onLinked={() => void completeParentLink()}
         />
       )}
       {guardianManageOpen && (
         <GuardianConnectionModal
           session={session}
-          saveProfile={saveProfile}
+          links={links}
+          reloadLinks={reloadLinks}
           toast={toast}
           onClose={() => setGuardianManageOpen(false)}
           onOpenLink={() => {
@@ -3538,81 +3970,68 @@ function MyPage({
   );
 }
 
+/**
+ * 보호자 연결 관리.
+ *
+ * 목록도 해제도 USER_LINK API가 답합니다. 예전에는 localStorage의 ansimUsers를 훑어
+ * "내 전화번호를 parent로 가진 계정"을 보호자로 쳤습니다 — 그 값은 브라우저에 있었으므로
+ * 고치는 것만으로 남의 보호자가 될 수 있었습니다.
+ */
 function GuardianConnectionModal({
   session,
-  saveProfile,
+  links,
+  reloadLinks,
   toast,
   onClose,
   onOpenLink,
 }: {
   session: Session;
-  saveProfile: (session: Session) => void;
+  links: ApiLink[];
+  reloadLinks: () => Promise<void>;
   toast: (toast: Toast) => void;
   onClose: () => void;
   onOpenLink: () => void;
 }) {
   const isGuardianAccount = session.accountType === "guardian";
+  const ward = isGuardianAccount ? links[0] : undefined;
 
-  const [guardians, setGuardians] = useState<SavedUser[]>(() =>
-    isGuardianAccount
-      ? []
-      : getSavedUsers().filter(
-          (user) =>
-            (user.accountType ?? "user") === "guardian" &&
-            user.parent &&
-            normalizePhone(user.parent.phone) === normalizePhone(session.phone),
-        ),
-  );
+  const unlink = async (target: { wardId?: string; guardianId?: string }) => {
+    const result = await deleteLink(target);
+    if (result.status !== "success") {
+      toast({ message: errorMessage(result) });
+      return;
+    }
 
-  const disconnectGuardian = (guardianId: string) => {
-    saveSavedUsers(
-      getSavedUsers().map((user) =>
-        user.id === guardianId ? { ...user, parent: undefined } : user,
-      ),
-    );
-    setGuardians((value) => value.filter((g) => g.id !== guardianId));
-    toast({ message: "보호자 연결이 해제되었습니다.", tone: "blue" });
+    await reloadLinks();
+    toast({ message: "연결이 해제되었습니다.", tone: "blue" });
   };
 
   if (isGuardianAccount) {
-    const disconnect = () => {
-      saveSavedUsers(
-        getSavedUsers().map((user) =>
-          user.id === session.id ? { ...user, parent: undefined } : user,
-        ),
-      );
-      saveProfile({
-        ...session,
-        parentName: undefined,
-        parentPhone: undefined,
-        parentRelation: undefined,
-      });
-      toast({ message: "피보호인 연결이 해제되었습니다.", tone: "blue" });
-      onClose();
-    };
-
     return (
       <Modal onClose={onClose}>
         <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-blue-50 text-2xl">
           🔗
         </span>
         <h2 className="mt-4 text-2xl font-black">보호자 연결 관리</h2>
-        {session.parentName ? (
+        {ward ? (
           <>
             <p className="mt-2 text-sm leading-6 text-slate-500">
-              현재 <b>{session.parentName}</b>님과 연결되어 데일리노트, 일정,
+              현재 <b>{ward.wardName}</b>님과 연결되어 데일리노트, 일정,
               건강 리포트를 확인하고 있어요.
             </p>
             <div className="mt-5 rounded-2xl bg-blue-50 p-4">
-              <p className="text-sm font-black">{session.parentName} 님</p>
+              <p className="text-sm font-black">{ward.wardName} 님</p>
               <p className="mt-1 text-sm text-slate-500">
-                {session.parentRelation || "가족"}
-                {session.parentPhone &&
-                  ` · ${session.parentPhone.slice(0, 3)}-${session.parentPhone.slice(3, 7)}-${session.parentPhone.slice(7)}`}
+                {ward.relation || "가족"}
+                {ward.wardPhone &&
+                  ` · ${ward.wardPhone.slice(0, 3)}-${ward.wardPhone.slice(3, 7)}-${ward.wardPhone.slice(7)}`}
               </p>
             </div>
             <button
-              onClick={disconnect}
+              onClick={() => {
+                void unlink({ wardId: ward.wardId });
+                onClose();
+              }}
               className="mt-5 w-full rounded-xl bg-red-50 py-3 font-black text-red-600"
             >
               연결 해제하기
@@ -3644,26 +4063,27 @@ function GuardianConnectionModal({
       <h2 className="mt-4 text-2xl font-black">보호자 연결 관리</h2>
       <p className="mt-2 text-sm leading-6 text-slate-500">
         나와 연결되어 내 기록을 확인할 수 있는 보호자 목록이에요.
+        연결을 끊는 데 상대의 동의는 필요하지 않아요.
       </p>
-      {guardians.length === 0 ? (
+      {links.length === 0 ? (
         <p className="mt-5 rounded-2xl bg-slate-50 p-5 text-center text-sm font-bold text-slate-400">
           아직 연결된 보호자가 없어요.
         </p>
       ) : (
         <div className="mt-5 space-y-3">
-          {guardians.map((guardian) => (
+          {links.map((link) => (
             <div
-              key={guardian.id}
+              key={link.id}
               className="flex items-center justify-between gap-3 rounded-2xl bg-slate-50 p-4"
             >
               <div>
-                <p className="font-black">{guardian.name}</p>
+                <p className="font-black">{link.guardianName}</p>
                 <p className="mt-1 text-sm text-slate-500">
-                  {guardian.parent?.relation || "가족"} · {guardian.phone}
+                  {link.relation || "가족"} · {formatMoment(link.consentAt)} 동의
                 </p>
               </div>
               <button
-                onClick={() => disconnectGuardian(guardian.id)}
+                onClick={() => void unlink({ guardianId: link.guardianId })}
                 className="shrink-0 rounded-xl bg-red-50 px-4 py-2.5 text-sm font-black text-red-600"
               >
                 연결 해제
@@ -3878,12 +4298,27 @@ function MyPagePasswordReset({ onClose }: { onClose: () => void }) {
   );
 }
 
+/**
+ * 피보호인 계정 연동.
+ *
+ * 대조는 서버(/api/link/verify)가 합니다. 예전에는 localStorage의 ansimUsers를 뒤져
+ * 이름·주민번호·전화번호가 맞는 항목을 찾았고, "김순자 / 480312 / 2 / 01012345678"이라는
+ * 시연용 계정이 코드에 박혀 있었습니다. 그 대조는 브라우저 안에서만 일어났으므로
+ * 저장값을 고치는 것만으로 누구의 보호자든 될 수 있었습니다.
+ *
+ * verify를 create보다 먼저 부르는 이유: 동의 체크를 누르기 전에 "그런 계정이 없다"를
+ * 말해 주기 위해서입니다. verify 응답에는 계정 식별자가 담기지 않습니다 — 담으면
+ * 이름과 전화번호를 바꿔 가며 계정을 캐낼 수 있는 창구가 됩니다.
+ *
+ * 주민등록번호는 서버에도 저장되지 않습니다. 앞 6자리와 뒷자리 첫 숫자로 생년월일을
+ * 환산해 USER_INFO.BIRTH_DATE와 맞춰 볼 뿐입니다.
+ */
 function ParentLinkModal({
   onClose,
   onLinked,
 }: {
   onClose: () => void;
-  onLinked: (parent: ParentLink) => void;
+  onLinked: () => void;
 }) {
   const [name, setName] = useState("");
   const [residentFront, setResidentFront] = useState("");
@@ -3892,8 +4327,9 @@ function ParentLinkModal({
   const [relation, setRelation] = useState("자녀");
   const [consent, setConsent] = useState(false);
   const [error, setError] = useState("");
+  const [pending, setPending] = useState(false);
 
-  const verifyAndLink = () => {
+  const verifyAndLink = async () => {
     const normalizedPhone = phone.replace(/\D/g, "");
     if (
       name.trim().length < 2 ||
@@ -3909,32 +4345,33 @@ function ParentLinkModal({
       return;
     }
 
-    const isDemoParent =
-      name.trim() === "김순자" &&
-      residentFront === "480312" &&
-      residentBackFirst === "2" &&
-      normalizedPhone === "01012345678";
-    const users = getSavedUsers();
-    const matchedParent = users.some(
-      (user) =>
-        (user.accountType ?? "user") === "user" &&
-        user.name === name.trim() &&
-        user.residentFront === residentFront &&
-        user.residentBackFirst === residentBackFirst &&
-        user.phone === normalizedPhone,
-    );
-    if (!isDemoParent && !matchedParent) {
-      setError("입력한 정보와 일치하는 사용자 계정을 찾을 수 없습니다.");
+    const params = {
+      name: name.trim(),
+      residentFront,
+      residentBackFirst,
+      phone: normalizedPhone,
+    };
+
+    setPending(true);
+    setError("");
+
+    // 먼저 대조만 해 봅니다. 여기서 걸리면 동의가 소비되지 않습니다.
+    const found = await verifyWard(params);
+    if (found.status !== "success") {
+      setPending(false);
+      setError(errorMessage(found));
       return;
     }
 
-    onLinked({
-      name: name.trim(),
-      phone: normalizedPhone,
-      relation,
-      residentFront,
-      residentBackFirst,
-    });
+    const created = await createLink({ ...params, relation });
+    setPending(false);
+
+    if (created.status !== "success") {
+      setError(errorMessage(created));
+      return;
+    }
+
+    onLinked();
   };
 
   return (
@@ -4048,10 +4485,11 @@ function ParentLinkModal({
           취소
         </button>
         <button
-          onClick={verifyAndLink}
-          className="flex-[1.5] rounded-xl bg-blue-600 py-3 font-black text-white shadow-lg shadow-blue-200"
+          onClick={() => void verifyAndLink()}
+          disabled={pending}
+          className="flex-[1.5] rounded-xl bg-blue-600 py-3 font-black text-white shadow-lg shadow-blue-200 disabled:bg-slate-300"
         >
-          인증하고 연결하기
+          {pending ? "확인 중이에요…" : "인증하고 연결하기"}
         </button>
       </div>
     </Modal>

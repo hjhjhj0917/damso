@@ -2,12 +2,7 @@ import { type FormEvent, useEffect, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { FindIdView } from "./FindIdView";
 import { FindPasswordView } from "./FindPasswordView";
-import {
-  AUTH_INPUT_CLASS,
-  getParentLink,
-  normalizeId,
-  toAccountType,
-} from "./authShared";
+import { AUTH_INPUT_CLASS, normalizeId, toAccountType } from "./authShared";
 import { errorMessage, login as loginRequest } from "../utils/api";
 
 type LoginModalMode = "login" | "findId" | "findPassword";
@@ -126,10 +121,9 @@ function LoginModal({ onClose }: { onClose: () => void }) {
     }
 
     const user = result.data;
-    // 보호자-어르신 연결은 아직 서버에 없어서 브라우저에 남아 있습니다. USER_LINK API가
-    // 생기면 이 세 줄과 getParentLink가 함께 사라집니다.
-    const parent = getParentLink(user.id);
-
+    // 화면을 즉시 그리기 위한 사본입니다. 연결 정보는 담지 않습니다 — 그건 이제
+    // USER_LINK 표에 있고 Dashboard가 /api/link/list로 받습니다. 권한을 정하는 값을
+    // 브라우저 저장소에 두면 저장값을 고치는 것만으로 권한이 생깁니다.
     localStorage.setItem(
       "ansimSession",
       JSON.stringify({
@@ -137,9 +131,6 @@ function LoginModal({ onClose }: { onClose: () => void }) {
         name: user.name,
         phone: user.phone ?? "",
         accountType: toAccountType(user.roles),
-        parentName: parent?.name,
-        parentPhone: parent?.phone,
-        parentRelation: parent?.relation,
       }),
     );
 

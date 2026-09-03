@@ -53,13 +53,13 @@ export function toAccountType(roles: ApiUser['roles']): AccountType {
 }
 
 /*
- * 아래 localStorage 헬퍼는 아직 서버로 옮기지 못한 두 가지에만 남아 있습니다.
+ * 아래 localStorage 헬퍼는 이제 관리자 화면의 전체 회원 목록에만 남아 있습니다
+ * (목록 조회 엔드포인트가 아직 없습니다).
  *
- *   - 보호자-어르신 연결 (USER_LINK 테이블과 API가 아직 없음)
- *   - 관리자 화면의 전체 회원 목록 (목록 조회 엔드포인트가 아직 없음)
- *
- * 가입/로그인/찾기/마이페이지는 전부 utils/api.ts를 거칩니다. 위 두 기능이 서버로 옮겨가면
- * 이 헬퍼와 SavedUser 타입도 함께 지워야 합니다.
+ * 보호자-어르신 연결은 USER_LINK 표와 /api/link/* 로 옮겨갔습니다. 그래서 여기 있던
+ * getParentLink / saveParentLink 와 'ansimParentLinks' 저장 키는 예고대로 지웠습니다.
+ * 그 값들은 브라우저 안에만 있었으므로, 저장값을 고치는 것만으로 누구의 보호자든 될 수
+ * 있었습니다. 이제는 서버가 이름·생년월일·전화번호를 대조하고 동의 시각까지 남깁니다.
  */
 const USERS_STORAGE_KEY = 'ansimUsers'
 
@@ -70,28 +70,6 @@ export function getSavedUsers(): SavedUser[] {
 
 export function saveSavedUsers(users: SavedUser[]) {
   localStorage.setItem(USERS_STORAGE_KEY, JSON.stringify(users))
-}
-
-/**
- * 보호자가 연결한 피보호인 정보. 회원 정보가 서버로 옮겨가면서 SavedUser에 얹어 두던
- * parent 필드가 갈 곳을 잃어, 회원 ID를 키로 따로 보관합니다. USER_LINK API가 생기면
- * 이 두 함수와 저장 키를 함께 지웁니다.
- */
-const PARENT_LINK_STORAGE_KEY = 'ansimParentLinks'
-
-type ParentLinkMap = Record<string, ParentProfile>
-
-export function getParentLink(userId: string): ParentProfile | undefined {
-  const stored = localStorage.getItem(PARENT_LINK_STORAGE_KEY)
-  if (!stored) return undefined
-  return (JSON.parse(stored) as ParentLinkMap)[userId]
-}
-
-export function saveParentLink(userId: string, parent: ParentProfile) {
-  const stored = localStorage.getItem(PARENT_LINK_STORAGE_KEY)
-  const map = stored ? (JSON.parse(stored) as ParentLinkMap) : {}
-  map[userId] = parent
-  localStorage.setItem(PARENT_LINK_STORAGE_KEY, JSON.stringify(map))
 }
 
 type EmailVerificationOptions = {
