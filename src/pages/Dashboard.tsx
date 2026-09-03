@@ -184,7 +184,7 @@ function Dashboard() {
   const visibleNavItems = isGuardian
     ? navItems.filter((item) =>
         (hasLinkedParent
-          ? ["home", "notes", "calendar", "health", "mypage"]
+          ? ["home", "notes", "calendar", "biography", "health", "mypage"]
           : ["home", "mypage"]
         ).includes(item.id),
       )
@@ -490,9 +490,11 @@ function Dashboard() {
                   ? "피보호인 데일리노트"
                   : isGuardian && item.id === "calendar"
                     ? "피보호인 일정"
-                    : isGuardian && item.id === "health"
-                      ? "피보호인 건강 리포트"
-                      : item.label
+                    : isGuardian && item.id === "biography"
+                      ? "피보호인 자서전"
+                      : isGuardian && item.id === "health"
+                        ? "피보호인 건강 리포트"
+                        : item.label
               }
               onClick={() => go(item.id)}
             />
@@ -618,9 +620,11 @@ function Dashboard() {
                 ? "피보호인 노트"
                 : isGuardian && item.id === "calendar"
                   ? "피보호인 일정"
-                  : isGuardian && item.id === "health"
-                    ? "건강 리포트"
-                    : item.label}
+                  : isGuardian && item.id === "biography"
+                    ? "자서전"
+                    : isGuardian && item.id === "health"
+                      ? "건강 리포트"
+                      : item.label}
             </span>
           </button>
         ))}
@@ -2730,7 +2734,7 @@ function BiographyView({
 
   return (
     <Page
-      eyebrow="나의 삶, 한 권의 책"
+      eyebrow={readOnly ? `${ownerName}님의 삶, 한 권의 책` : "나의 삶, 한 권의 책"}
       title={readOnly ? `${ownerName}님의 자서전` : "나의 자서전"}
       description="쌓인 데일리노트를 AI가 시대와 주제별로 엮어 인생 이야기로 만들어요."
       action={
@@ -3791,18 +3795,24 @@ function MyPage({
                   연결됨
                 </span>
               </div>
-              <div className="mt-5 grid grid-cols-2 gap-3">
+              <div className="mt-5 grid grid-cols-3 gap-3">
                 <button
                   onClick={() => go("notes")}
                   className="rounded-xl bg-white py-3 text-sm font-black text-blue-700"
                 >
-                  데일리노트 보기
+                  데일리노트
+                </button>
+                <button
+                  onClick={() => go("biography")}
+                  className="rounded-xl bg-white py-3 text-sm font-black text-blue-700"
+                >
+                  자서전
                 </button>
                 <button
                   onClick={() => go("health")}
                   className="rounded-xl bg-white py-3 text-sm font-black text-blue-700"
                 >
-                  건강 리포트 보기
+                  건강 리포트
                 </button>
               </div>
               <button
@@ -3844,7 +3854,9 @@ function MyPage({
                 {navItems
                   .filter((item) =>
                     session.accountType === "guardian"
-                      ? ["health", "notes", "calendar"].includes(item.id)
+                      ? ["health", "notes", "calendar", "biography"].includes(
+                          item.id,
+                        )
                       : [
                           "health",
                           "chat",
@@ -3870,9 +3882,12 @@ function MyPage({
                               item.id === "calendar"
                             ? "피보호인 일정"
                             : session.accountType === "guardian" &&
-                                item.id === "health"
-                              ? "피보호인 건강 리포트"
-                              : item.label}
+                                item.id === "biography"
+                              ? "피보호인 자서전"
+                              : session.accountType === "guardian" &&
+                                  item.id === "health"
+                                ? "피보호인 건강 리포트"
+                                : item.label}
                       </b>
                       <span className="ml-auto text-slate-300">›</span>
                     </button>
