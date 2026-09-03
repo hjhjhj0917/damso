@@ -61,6 +61,21 @@ export function formatDate(iso?: string) {
   return `${match[1]}. ${match[2]}. ${match[3]}`
 }
 
+/**
+ * 가입 시각(epoch millis) → 오늘까지의 일수. 가입 당일이 1일입니다. 값이 없으면 null.
+ *
+ * 양쪽을 자정으로 맞춘 뒤에 뺍니다. 그냥 빼서 86400000으로 나누면 가입한 지 23시간 된 사람과
+ * 1시간 된 사람이 달력상 하루 차이여도 같은 숫자를 보게 됩니다.
+ */
+export function daysSince(millis?: number, now: Date = new Date()) {
+  if (!millis) return null
+  const start = new Date(millis)
+  start.setHours(0, 0, 0, 0)
+  const today = new Date(now)
+  today.setHours(0, 0, 0, 0)
+  return Math.floor((today.getTime() - start.getTime()) / 86_400_000) + 1
+}
+
 /** epoch millis → "7월 2일 오후 8:04". 코멘트와 대화 목록이 씁니다. */
 export function formatMoment(millis?: number) {
   if (!millis) return ''

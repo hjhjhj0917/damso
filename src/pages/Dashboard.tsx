@@ -52,6 +52,7 @@ import AdminView from "./AdminView";
 import { PrivacyView } from "./Support";
 import {
   autobiographyStatusLabel,
+  daysSince,
   findDueSchedules,
   formatDate,
   formatMoment,
@@ -84,6 +85,10 @@ type Session = {
   name: string;
   phone: string;
   accountType?: AccountType;
+  /** YYYY-MM-DD. 서버 USER_INFO.BIRTH_DATE, 가입 때 받아 둔 값입니다. */
+  birthDate?: string;
+  /** 가입 시각(epoch millis). "함께한 지 N일"을 세는 데만 씁니다. */
+  createdAt?: number;
 };
 type Toast = { message: string; tone?: "blue" | "green" };
 type FamilyContact = {
@@ -178,11 +183,7 @@ function Dashboard() {
     ? routeTab
     : "home";
   const [session, setSession] = useState<Session>(() =>
-    loadStored("ansimSession", {
-      id: "demo",
-      name: "김순자",
-      phone: "01012345678",
-    }),
+    loadStored<Session>("ansimSession", { id: "", name: "", phone: "" }),
   );
   // 기록은 전부 서버가 갖고 있습니다. 화면은 사본을 들고 있다가, 쓰기에 성공했을 때만
   // 그 사본을 고칩니다 — 순서를 뒤집으면 저장에 실패해도 화면에는 남아 다음 새로고침에
@@ -319,6 +320,8 @@ function Dashboard() {
         name: user.name,
         phone: user.phone ?? "",
         accountType: toAccountType(user.roles),
+        birthDate: user.birthDate,
+        createdAt: user.createdAt,
       }));
     });
 
@@ -382,10 +385,16 @@ function Dashboard() {
    */
   const saveProfile = async (next: Session) => {
     const changedProfile =
-      next.name !== session.name || next.phone !== session.phone;
+      next.name !== session.name ||
+      next.phone !== session.phone ||
+      next.birthDate !== session.birthDate;
 
     if (changedProfile) {
-      const result = await updateProfile({ name: next.name, phone: next.phone });
+      const result = await updateProfile({
+        name: next.name,
+        phone: next.phone,
+        birthDate: next.birthDate || undefined,
+      });
       if (result.status !== "success") {
         setToast({ message: errorMessage(result) });
         return;
@@ -624,6 +633,8 @@ function Dashboard() {
           <MyPage
             session={session}
             links={links}
+            noteCount={notes.length}
+            chapterCount={chapters.length}
             reloadLinks={reloadLinks}
             saveProfile={saveProfile}
             go={go}
@@ -3534,6 +3545,8 @@ function CareRow({
 function MyPage({
   session,
   links,
+  noteCount,
+  chapterCount,
   reloadLinks,
   saveProfile,
   go,
@@ -3543,6 +3556,8 @@ function MyPage({
 }: {
   session: Session;
   links: ApiLink[];
+  noteCount: number;
+  chapterCount: number;
   reloadLinks: () => Promise<void>;
   saveProfile: (session: Session) => void;
   go: (tab: ServiceTab) => void;
@@ -3555,8 +3570,10 @@ function MyPage({
   // 보호자에게는 연결된 피보호인이, 어르신에게는 연결된 보호자들이 담깁니다.
   const linkedWard = isGuardianAccount ? links[0] : undefined;
   const linkedName = linkedWard?.wardName;
-  const [form, setForm] = useState(session);
-  const [edit, setEdit] = useState(false);
+  const [draft, setDraft] = useState<Session | null>(null);
+  const edit = draft !== null;
+  const form = draft ?? session;
+  const setForm = setDraft;
   const [withdraw, setWithdraw] = useState(false);
   const [withdrawPassword, setWithdrawPassword] = useState("");
   const [withdrawError, setWithdrawError] = useState("");
@@ -3564,7 +3581,29 @@ function MyPage({
   const [passwordResetOpen, setPasswordResetOpen] = useState(false);
   const [guardianManageOpen, setGuardianManageOpen] = useState(false);
   const [privacyOpen, setPrivacyOpen] = useState(false);
-  const maskedPhone = `${session.phone.slice(0, 3)}-${session.phone.slice(3, 7)}-${session.phone.slice(7)}`;
+  const maskedPhone = session.phone
+    ? `${session.phone.slice(0, 3)}-${session.phone.slice(3, 7)}-${session.phone.slice(7)}`
+    : "";
+  const joinedDays = daysSince(session.createdAt);
+
+  const [roomCount, setRoomCount] = useState<number | null>(null);
+  useEffect(() => {
+    if (isGuardianAccount) return;
+
+    let cancelled = false;
+
+    void fetchChatRooms().then((result) => {
+      if (cancelled) return;
+      if (result.status === "success" && result.data) {
+        setRoomCount(result.data.length);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isGuardianAccount]);
+
   const clearLocalSession = () => {
     localStorage.removeItem("ansimSession");
     localStorage.removeItem("ansimAutoLogin");
@@ -3631,7 +3670,9 @@ function MyPage({
               ? linkedName
                 ? `${linkedName}님의 보호자`
                 : "피보호인 계정 미연동"
-              : "담소와 함께한 지 128일"}
+              : joinedDays
+                ? `담소와 함께한 지 ${joinedDays}일`
+                : "담소와 함께하는 중"}
           </p>
           <span
             className={`mt-4 inline-flex rounded-full px-3 py-1 text-xs font-black ${isGuardianAccount && !linkedName ? "bg-amber-50 text-amber-700" : "bg-emerald-50 text-emerald-600"}`}
@@ -3643,28 +3684,24 @@ function MyPage({
                 : "보호자 계정 · 연결 필요"
               : "본인인증 완료"}
           </span>
-          <div className="mt-6 grid grid-cols-3 border-t border-slate-100 pt-5">
+          <div
+            className={`mt-6 grid ${isGuardianAccount ? "grid-cols-2" : "grid-cols-3"} border-t border-slate-100 pt-5`}
+          >
             <MiniStat
               value={
-                linkedName || !isGuardianAccount
-                  ? "24"
-                  : "-"
+                linkedName || !isGuardianAccount ? String(noteCount) : "-"
               }
               label="기록"
             />
+            {!isGuardianAccount && (
+              <MiniStat
+                value={roomCount === null ? "-" : String(roomCount)}
+                label="대화"
+              />
+            )}
             <MiniStat
               value={
-                linkedName || !isGuardianAccount
-                  ? "18"
-                  : "-"
-              }
-              label="대화"
-            />
-            <MiniStat
-              value={
-                linkedName || !isGuardianAccount
-                  ? "3"
-                  : "-"
+                linkedName || !isGuardianAccount ? String(chapterCount) : "-"
               }
               label="자서전"
             />
@@ -3686,7 +3723,7 @@ function MyPage({
                 </p>
               </div>
               <button
-                onClick={() => setEdit(!edit)}
+                onClick={() => setDraft(edit ? null : session)}
                 className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-black text-blue-600"
               >
                 {edit ? "취소" : "수정"}
@@ -3696,7 +3733,7 @@ function MyPage({
               onSubmit={(e) => {
                 e.preventDefault();
                 saveProfile(form);
-                setEdit(false);
+                setDraft(null);
               }}
               className="mt-6 grid gap-5 sm:grid-cols-2"
             >
@@ -3718,7 +3755,17 @@ function MyPage({
                   })
                 }
               />
-              <ProfileField label="생년월일" value="1948년 3월 12일" disabled />
+              <ProfileField
+                label="생년월일"
+                type={edit ? "date" : "text"}
+                value={
+                  edit
+                    ? (form.birthDate ?? "")
+                    : formatDate(session.birthDate) || "미등록"
+                }
+                disabled={!edit}
+                onChange={(value) => setForm({ ...form, birthDate: value })}
+              />
               {edit && (
                 <button className="rounded-xl bg-blue-600 py-3 font-black text-white sm:col-span-2">
                   변경사항 저장
@@ -4101,11 +4148,13 @@ function ProfileField({
   value,
   disabled,
   onChange,
+  type = "text",
 }: {
   label: string;
   value: string;
   disabled?: boolean;
   onChange?: (value: string) => void;
+  type?: "text" | "date";
 }) {
   return (
     <label>
@@ -4113,6 +4162,7 @@ function ProfileField({
         {label}
       </span>
       <input
+        type={type}
         value={value}
         disabled={disabled}
         onChange={(e) => onChange?.(e.target.value)}
