@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTO Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="hanium.damso.mapper.IUserMapper">
+    <!--
+        중복확인에는 IS_DELETED 필터를 넣지 않는다. 탈퇴해도 행은 남아 PK와 UNIQUE를 계속
+        점유하므로, 필터를 넣으면 "사용 가능"이라 답해 놓고 INSERT에서 중복키로 터진다.
+    -->
+    <select id="getIdExists" resultType="UserDTO">
+        SELECT COUNT(*) > 0 AS `EXISTS`
+        FROM USER_INFO
+        WHERE USER_ID = #{id}
+    </select>
+
+    <select id="getEmailExists" resultType="UserDTO">
+        SELECT COUNT(*) > 0 AS `EXISTS`
+        FROM USER_INFO
+        WHERE EMAIL = #{email}
+    </select>
+
+    <!-- ONBOARDING_COMPLETED, IS_DELETED, CREATED_AT, UPDATED_AT은 컬럼 기본값에 맡긴다. -->
+    <insert id="insertUser">
+        INSERT INTO USER_INFO
+            (USER_ID, USER_NAME, PASSWORD, PASSWORD_SALT, EMAIL, PHONE, ROLES, BIRTH_DATE)
+        VALUES (#{id}, #{name}, #{password}, #{passwordSalt}, #{email}, #{phone}, #{roles}, #{birthDate})
+    </insert>
+
+    <!--
+        IS_DELETED = 'N'이 여기서 핵심이다. kindy에는 소프트 삭제가 없어 이 조건이 없었고,
+        그대로 옮기면 탈퇴한 회원이 그대로 로그인된다.
+    -->
+    <select id="getLogin" resultType="UserDTO">
+        SELECT USER_ID AS ID, USER_NAME AS NAME, PASSWORD, PASSWORD_SALT, ROLES
+        FROM USER_INFO
+        WHERE USER_ID = #{id}
+          AND IS_DELETED = 'N'
+    </select>
+
+    <select id="getInfo" resultType="UserDTO">
+        SELECT USER_ID AS ID,
+               USER_NAME AS NAME,
+               EMAIL,
+               PHONE,
+               ROLES,
+               BIRTH_DATE,
+               ONBOARDING_COMPLETED,
+               UNIX_TIMESTAMP(CREATED_AT) * 1000 AS CREATED_AT,
+               UNIX_TIMESTAMP(UPDATED_AT) * 1000 AS UPDATED_AT
+        FROM USER_INFO
+        WHERE USER_ID = #{id}
+          AND IS_DELETED = 'N'
+    </select>
+
+    <!--
+        마이페이지 수정은 항목별로 따로 올라온다. 보낸 컬럼만 건드려야 이름을 고치다가
+        전화번호를 지우는 일이 없다.
+
+        kindy는 NAME을 일부러 뺐지만(실명은 가입 시 확정) 담소 마이페이지는 이름 입력란이
+        열려 있어서 여기서는 허용한다.
+    -->
+    <update id="updateInfo">
+        UPDATE USER_INFO
+        <set>
+            <if test="name != null">USER_NAME = #{name},</if>
+            <if test="phone != null">PHONE = #{phone},</if>
+            <if test="birthDate != null">BIRTH_DATE = #{birthDate},</if>
+        </set>
+        WHERE USER_ID = #{id}
+          AND IS_DELETED = 'N'
+    </update>
+
+    <select id="getId" resultType="UserDTO">
+        SELECT USER_ID AS ID, USER_NAME AS NAME, EMAIL
+        FROM USER_INFO
+        WHERE EMAIL = #{email}
+          AND IS_DELETED = 'N'
+        <if test="id != null and id != ''">
+            AND USER_ID = #{id}
+        </if>
+    </select>
+
+    <update id="updatePassword">
+        UPDATE USER_INFO
+        SET PASSWORD = #{password}, PASSWORD_SALT = #{passwordSalt}
+        WHERE USER_ID = #{id}
+          AND IS_DELETED = 'N'
+    </update>
+
+    <update id="completeOnboarding">
+        UPDATE USER_INFO
+        SET ONBOARDING_COMPLETED = TRUE
+        WHERE USER_ID = #{id}
+          AND IS_DELETED = 'N'
+    </update>
+
+    <!--
+        탈퇴는 행을 지우지 않는다. CONTENT_MASTER가 USER_ID를 ON DELETE RESTRICT로 참조하고
+        있어 지워지지도 않고, 지워지면 그 사람이 남긴 일기와 대화가 함께 사라진다.
+        EMAIL은 UNIQUE라서 비워 주지 않으면 같은 주소로 다시 가입할 수 없다.
+    -->
+    <update id="withdraw">
+        UPDATE USER_INFO
+        SET IS_DELETED = 'Y',
+            DELETED_AT = NOW(),
+            EMAIL      = CONCAT('withdrawn+', USER_ID, '@damso.invalid')
+        WHERE USER_ID = #{id}
+          AND IS_DELETED = 'N'
+    </update>
+</mapper>
