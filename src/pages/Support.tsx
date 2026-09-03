@@ -1,5 +1,7 @@
 import { type FormEvent, type ReactNode, useEffect, useState } from 'react'
-import { Link, useSearchParams } from 'react-router-dom'
+import { Link, useLocation, useSearchParams } from 'react-router-dom'
+import { useSession } from '../session/sessionContext'
+import { loginHref } from '../utils/authRedirect'
 import {
   createInquiry,
   errorMessage,
@@ -31,12 +33,28 @@ const faqs = [
 const isSupportTab = (value: string | null): value is SupportTab =>
   value === 'faq' || value === 'privacy' || value === 'inquiry'
 
+/**
+ * 어느 탭을 보고 있는지는 주소가 갖습니다.
+ *
+ * 예전에는 첫 렌더에 ?tab을 한 번 읽고 그 뒤로는 화면 상태로만 바뀌었습니다. 그래서 눌러서
+ * 1:1 문의로 들어온 사람의 주소는 /support였고, 로그인하고 돌아오면 자주 묻는 질문이 떠서
+ * 쓰던 자리를 잃었습니다.
+ */
 function Support() {
-  const [searchParams] = useSearchParams()
+  const [searchParams, setSearchParams] = useSearchParams()
+  const { status } = useSession()
   const requestedTab = searchParams.get('tab')
-  const [activeTab, setActiveTab] = useState<SupportTab>(
-    isSupportTab(requestedTab) ? requestedTab : 'faq',
-  )
+  const activeTab: SupportTab = isSupportTab(requestedTab) ? requestedTab : 'faq'
+
+  // 갱신 함수 형태라 로그인 모달이 열려 있는 동안의 ?login=true가 살아남습니다.
+  const setActiveTab = (id: SupportTab) =>
+    setSearchParams(
+      (params) => {
+        params.set('tab', id)
+        return params
+      },
+      { replace: true },
+    )
 
   return (
     <main className="min-h-screen bg-[#f5f7fb]">
@@ -44,6 +62,11 @@ function Support() {
         <div className="mx-auto max-w-7xl px-5 py-12 sm:px-8 sm:py-16">
           <div className="flex flex-col justify-between gap-8 lg:flex-row lg:items-end">
             <div>
+              {status === 'authenticated' && (
+                <Link to="/dashboard" className="mb-3 inline-flex items-center gap-1 text-sm font-black text-slate-500 hover:text-blue-600">
+                  ← 대시보드로 돌아가기
+                </Link>
+              )}
               <p className="text-sm font-black tracking-[0.16em] text-blue-600">DAMSO HELP CENTER</p>
               <h1 className="mt-3 text-4xl font-black tracking-tight text-slate-950 sm:text-5xl">무엇을 도와드릴까요?</h1>
               <p className="mt-4 text-lg text-slate-500">서비스 이용부터 개인정보 보호까지, 필요한 답을 편하게 찾아보세요.</p>
@@ -65,7 +88,8 @@ function Support() {
         <section className="min-w-0">
           {activeTab === 'faq' && <FaqView onInquiry={() => setActiveTab('inquiry')} />}
           {activeTab === 'privacy' && <PrivacyView />}
-          {activeTab === 'inquiry' && <InquiryView />}
+          {/* 로그인·로그아웃이 일어나면 쓰던 문의 상태를 통째로 새로 시작합니다. */}
+          {activeTab === 'inquiry' && <InquiryView key={status} />}
         </section>
       </div>
     </main>
@@ -138,14 +162,20 @@ function DataTable({ rows }: { rows: string[][] }) {
  * 목록은 서버(INQUIRY 표)가 갖고 있고 내가 쓴 것만 돌아옵니다. 답변과 상태를 옮기는 것은
  * 운영자뿐이라 이 화면에는 쓰기가 '접수' 하나뿐입니다.
  *
- * 이 페이지는 로그인 없이도 열리지만 문의는 계정에 딸리므로, 세션이 없으면(INVALID_ACCESS)
- * 빈 목록 대신 로그인 안내를 그립니다 — 빈 목록만 보여 주면 남긴 문의가 사라진 것처럼 보입니다.
+ * 이 페이지는 로그인 없이도 열리지만 문의는 계정에 딸리므로, 세션이 없으면 빈 목록 대신
+ * 로그인 안내를 그립니다 — 빈 목록만 보여 주면 남긴 문의가 사라진 것처럼 보입니다.
+ *
+ * 로그인 여부는 이제 SessionProvider가 먼저 압니다. 예전에는 목록을 불러 보고 INVALID_ACCESS가
+ * 돌아와야 알았기 때문에, 비로그인 방문자도 헛되이 한 번 요청하고 "불러오는 중"을 지나
+ * 로그인 안내를 만났습니다. INVALID_ACCESS 처리는 남겨 둡니다 — 보는 도중에 세션이 끊기는
+ * 경우가 있고, 그때는 이 화면만 아는 대신 프로바이더에 알려 앱 전체가 같이 알게 합니다.
  */
 function InquiryView() {
+  const { status, refresh } = useSession()
+  const location = useLocation()
   const [inquiries, setInquiries] = useState<ApiInquiry[]>([])
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
-  const [needsLogin, setNeedsLogin] = useState(false)
 
   const [showForm, setShowForm] = useState(false)
   const [selected, setSelected] = useState<ApiInquiry | null>(null)
@@ -156,20 +186,21 @@ function InquiryView() {
   const [formError, setFormError] = useState('')
 
   useEffect(() => {
+    if (status !== 'authenticated') return
     let cancelled = false
 
     void fetchInquiries().then((result) => {
       if (cancelled) return
 
       if (result.status === 'success') setInquiries(result.data ?? [])
-      else if (result.code === 'INVALID_ACCESS') setNeedsLogin(true)
+      else if (result.code === 'INVALID_ACCESS') void refresh()
       else setLoadError(errorMessage(result))
 
       setLoading(false)
     })
 
     return () => { cancelled = true }
-  }, [])
+  }, [status, refresh])
 
   const submit = async (event: FormEvent) => {
     event.preventDefault()
@@ -183,7 +214,9 @@ function InquiryView() {
     const created = result.data
     if (result.status !== 'success' || !created) {
       // 접수에 실패하면 폼을 닫지 않습니다. 여기서 닫으면 방금 쓴 글이 어디에도 남지 않습니다.
-      if (result.code === 'INVALID_ACCESS') setNeedsLogin(true)
+      // INVALID_ACCESS는 "로그인이 필요하거나 권한이 없다"는 한 코드라, 만료로 넘겨짚고
+      // 로그아웃시키는 대신 서버에 다시 묻습니다.
+      if (result.code === 'INVALID_ACCESS') void refresh()
       setFormError(errorMessage(result))
       return
     }
@@ -192,9 +225,11 @@ function InquiryView() {
     setTitle(''); setContent(''); setShowForm(false); setSelected(created)
   }
 
-  if (needsLogin) return <div>
+  // 홈으로 보내지 않고 이 자리에서 모달을 엽니다. 예전에는 /?login=true로 나갔다가 로그인에
+  // 성공하면 대시보드로 떨어져, 문의를 쓰려던 사람이 고객센터를 다시 찾아 들어와야 했습니다.
+  if (status === 'anonymous') return <div>
     <SectionTitle eyebrow="1:1 INQUIRY" title="1:1 문의" description="문의 접수와 담당자의 답변 상태를 한곳에서 확인하세요." />
-    <div className="rounded-[1.5rem] border border-slate-200 bg-white p-10 text-center shadow-sm"><p className="text-lg font-black text-slate-800">로그인 후 이용할 수 있습니다.</p><p className="mt-2 text-sm text-slate-500">문의 내역은 계정에 저장되어 본인만 확인할 수 있습니다.</p><Link to="/?login=true" className="mt-6 inline-flex rounded-xl bg-blue-600 px-6 py-3 text-sm font-black text-white shadow-lg shadow-blue-200">로그인하기</Link></div>
+    <div className="rounded-[1.5rem] border border-slate-200 bg-white p-10 text-center shadow-sm"><p className="text-lg font-black text-slate-800">로그인 후 이용할 수 있습니다.</p><p className="mt-2 text-sm text-slate-500">문의 내역은 계정에 저장되어 본인만 확인할 수 있습니다.</p><Link to={loginHref(location.pathname, location.search)} className="mt-6 inline-flex rounded-xl bg-blue-600 px-6 py-3 text-sm font-black text-white shadow-lg shadow-blue-200">로그인하기</Link></div>
   </div>
 
   return <div>

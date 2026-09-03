@@ -1,10 +1,6 @@
 import { type ReactNode, useEffect, useRef, useState } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
-import {
-  normalizePhone,
-  toAccountType,
-  type AccountType,
-} from "../components/authShared";
+import { Link, Navigate, useLocation, useNavigate } from "react-router-dom";
+import { normalizePhone } from "../components/authShared";
 import {
   changePassword as changePasswordRequest,
   completeSchedule,
@@ -28,11 +24,9 @@ import {
   fetchMessages,
   fetchNotices,
   fetchSchedules,
-  fetchSession,
   fetchSpeechConfig,
   generateAutobiography,
   generateDiary,
-  logout as logoutRequest,
   messageOf,
   say,
   transcribe,
@@ -52,6 +46,11 @@ import {
 } from "../utils/api";
 import AdminView from "./AdminView";
 import { PrivacyView } from "./Support";
+import {
+  ANONYMOUS_SESSION,
+  useSession,
+  type SessionUser,
+} from "../session/sessionContext";
 import {
   autobiographyStatusLabel,
   daysSince,
@@ -77,23 +76,6 @@ import {
 import { canRecordAudio, useVoiceRecorder } from "../utils/recorder";
 import { useSpeaker } from "../utils/speaker";
 
-/**
- * 화면을 즉시 그리기 위한 로그인 사본. 진짜 세션은 서버가 갖습니다.
- *
- * 피보호인 연결 정보(parentName 등)가 예전에는 여기 얹혀 있었지만 이제 USER_LINK 표에 있고,
- * Dashboard가 fetchLinks로 받아 linkedWard로 씁니다. 로그인 사본에 권한을 담아 두면
- * 그 사본을 고치는 것만으로 남의 기록을 볼 수 있게 됩니다.
- */
-type Session = {
-  id: string;
-  name: string;
-  phone: string;
-  accountType?: AccountType;
-  /** YYYY-MM-DD. 서버 USER_INFO.BIRTH_DATE, 가입 때 받아 둔 값입니다. */
-  birthDate?: string;
-  /** 가입 시각(epoch millis). "함께한 지 N일"을 세는 데만 씁니다. */
-  createdAt?: number;
-};
 type Toast = { message: string; tone?: "blue" | "green" };
 /**
  * 알림을 받을 방법. 정하는 사람은 <b>받는 본인</b>입니다 — 마이페이지 설정에 있습니다.
@@ -127,9 +109,10 @@ function Dashboard() {
   const activeTab = navItems.some((item) => item.id === routeTab)
     ? routeTab
     : "home";
-  const [session, setSession] = useState<Session>(() =>
-    loadStored<Session>("ansimSession", { id: "", name: "", phone: "" }),
-  );
+  // 로그인 여부와 사용자 값은 SessionProvider가 갖습니다. 예전에는 이 화면이 브라우저 사본을
+  // 직접 읽고 서버에 다시 물어보기까지 했는데, 그 사이 한 번은 남의 화면이 그려졌습니다.
+  const { status, user, updateUser } = useSession();
+  const session = user ?? ANONYMOUS_SESSION;
   // 기록은 전부 서버가 갖고 있습니다. 화면은 사본을 들고 있다가, 쓰기에 성공했을 때만
   // 그 사본을 고칩니다 — 순서를 뒤집으면 저장에 실패해도 화면에는 남아 다음 새로고침에
   // 조용히 되돌아갑니다.
@@ -248,41 +231,6 @@ function Dashboard() {
   }, [schedules, notificationsEnabled]);
 
   /**
-   * 진짜 로그인 여부는 서버 세션이 정합니다. localStorage의 ansimSession은 화면을 즉시
-   * 그리기 위한 사본일 뿐이라, 세션이 만료됐거나 다른 탭에서 로그아웃했으면 여기서 걸러
-   * 첫 화면으로 돌려보냅니다. 살아 있으면 서버 값으로 사본을 갱신합니다.
-   */
-  useEffect(() => {
-    let cancelled = false;
-
-    void fetchSession().then((result) => {
-      if (cancelled) return;
-
-      if (result.status !== "success" || !result.data) {
-        localStorage.removeItem("ansimSession");
-        localStorage.removeItem("ansimAutoLogin");
-        navigate("/", { replace: true });
-        return;
-      }
-
-      const user = result.data;
-      setSession((current) => ({
-        ...current,
-        id: user.id,
-        name: user.name,
-        phone: user.phone ?? "",
-        accountType: toAccountType(user.roles),
-        birthDate: user.birthDate,
-        createdAt: user.createdAt,
-      }));
-    });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [navigate]);
-
-  /**
    * 연결 목록을 먼저 부릅니다. 보호자가 누구의 기록을 볼지가 여기서 정해지므로, 이것 없이
    * 기록을 부르면 자기 것(비어 있음)을 부르게 됩니다.
    */
@@ -335,7 +283,7 @@ function Dashboard() {
    * 서버에 저장하고, 성공했을 때만 화면 상태를 바꿉니다. 순서를 뒤집으면 저장에 실패해도
    * 화면에는 바뀐 값이 남아 다음 새로고침에 조용히 되돌아갑니다.
    */
-  const saveProfile = async (next: Session) => {
+  const saveProfile = async (next: SessionUser) => {
     const changedProfile =
       next.name !== session.name ||
       next.phone !== session.phone ||
@@ -353,8 +301,11 @@ function Dashboard() {
       }
     }
 
-    setSession(next);
-    localStorage.setItem("ansimSession", JSON.stringify(next));
+    updateUser({
+      name: next.name,
+      phone: next.phone,
+      birthDate: next.birthDate,
+    });
     setToast({ message: "내 정보가 안전하게 저장되었어요.", tone: "green" });
   };
 
@@ -370,6 +321,19 @@ function Dashboard() {
       ...value,
     ]);
   };
+
+  /**
+   * 로그인 확인이 끝나기 전에는 아무것도 그리지 않습니다.
+   *
+   * 예전에는 화면을 먼저 그려 놓고 효과에서 서버에 물어본 뒤 아니면 홈으로 보냈습니다. 그래서
+   * 로그인하지 않은 사람에게도 왕복 한 번 동안 대시보드 뼈대와 브라우저 사본에 남아 있던 이름이
+   * 보였습니다. <Navigate>는 그리는 시점에 자리를 옮기므로 그 틈이 없고, 로그아웃과 탈퇴도
+   * 각자 navigate를 부르지 않고 이 길 하나로 나갑니다.
+   *
+   * 훅보다 뒤에 있어야 합니다 — 위로 올리면 훅 순서가 렌더마다 달라집니다.
+   */
+  if (status === "loading") return <DashboardLoading />;
+  if (status === "anonymous") return <Navigate to="/" replace />;
 
   return (
     <div className="min-h-screen bg-[#f4f7fb] text-slate-900">
@@ -505,6 +469,13 @@ function Dashboard() {
           >
             0000-0000 연결
           </button>
+          {/* 전화만 있으면 통화가 가능한 시간에만 물어볼 수 있습니다. 글로 남기는 길도 둡니다. */}
+          <Link
+            to="/support"
+            className="mt-2 block w-full rounded-xl bg-white/10 py-2 text-center text-sm font-bold hover:bg-white/20"
+          >
+            FAQ · 1:1 문의 →
+          </Link>
         </div>
       </aside>
 
@@ -644,6 +615,24 @@ function Dashboard() {
           }}
         />
       )}
+    </div>
+  );
+}
+
+/** 로그인 확인이 끝나기를 기다리는 동안의 화면. 왕복은 한 번이고 App이 뜰 때 이미 시작됩니다. */
+function DashboardLoading() {
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-[#f4f7fb]">
+      <div className="text-center">
+        <img
+          src="/logo.svg"
+          alt="담소"
+          className="mx-auto h-16 w-16 animate-pulse rounded-3xl shadow-lg"
+        />
+        <p className="mt-5 text-lg font-bold text-slate-500">
+          불러오는 중이에요
+        </p>
+      </div>
     </div>
   );
 }
@@ -3690,23 +3679,24 @@ function MyPage({
   notificationsEnabled,
   setNotificationsEnabled,
 }: {
-  session: Session;
+  session: SessionUser;
   links: ApiLink[];
   noteCount: number;
   chapterCount: number;
   reloadLinks: () => Promise<void>;
-  saveProfile: (session: Session) => void;
+  saveProfile: (session: SessionUser) => void;
   go: (tab: ServiceTab) => void;
   toast: (toast: Toast) => void;
   notificationsEnabled: boolean;
   setNotificationsEnabled: (value: boolean) => void;
 }) {
   const navigate = useNavigate();
+  const { signOut } = useSession();
   const isGuardianAccount = session.accountType === "guardian";
   // 보호자에게는 연결된 피보호인이, 어르신에게는 연결된 보호자들이 담깁니다.
   const linkedWard = isGuardianAccount ? links[0] : undefined;
   const linkedName = linkedWard?.wardName;
-  const [draft, setDraft] = useState<Session | null>(null);
+  const [draft, setDraft] = useState<SessionUser | null>(null);
   const edit = draft !== null;
   const form = draft ?? session;
   const setForm = setDraft;
@@ -3756,17 +3746,9 @@ function MyPage({
     };
   }, [isGuardianAccount]);
 
-  const clearLocalSession = () => {
-    localStorage.removeItem("ansimSession");
-    localStorage.removeItem("ansimAutoLogin");
-  };
-
-  const logout = async () => {
-    // 서버 세션을 먼저 끊습니다. 브라우저 쪽만 지우면 쿠키가 살아 있어 그대로 다시 들어옵니다.
-    await logoutRequest();
-    clearLocalSession();
-    navigate("/");
-  };
+  // 나가는 길은 하나입니다. signOut이 상태를 비우면 Dashboard의 게이트가 홈으로 보냅니다 —
+  // 여기서 navigate까지 부르면 같은 이동이 두 번 일어납니다.
+  const logout = () => signOut();
 
   /** 탈퇴는 되돌릴 수 없으므로 서버가 현재 비밀번호를 다시 확인합니다. */
   const removeAccount = async () => {
@@ -3781,8 +3763,8 @@ function MyPage({
       return;
     }
 
-    clearLocalSession();
-    navigate("/");
+    // 탈퇴가 끝나면 서버 세션은 이미 없습니다. 로그아웃을 다시 부를 이유가 없습니다.
+    await signOut({ server: false });
   };
 
   /** 연결이 만들어지면 목록만 다시 받습니다. 연결 정보는 이제 서버가 갖습니다. */
@@ -4072,6 +4054,12 @@ function MyPage({
                 text="현재 비밀번호를 확인하고 새 비밀번호로 변경해요"
                 onClick={() => setPasswordResetOpen(true)}
               />
+              {/* 옆 메뉴의 고객센터 카드는 넓은 화면에만 있습니다. 좁은 화면의 길은 여기입니다. */}
+              <SettingRow
+                title="고객센터"
+                text="자주 묻는 질문과 1:1 문의를 확인해요"
+                onClick={() => navigate("/support")}
+              />
               <SettingRow
                 title="개인정보 처리방침"
                 text="내 정보가 어떻게 보호되는지 확인해요"
@@ -4204,7 +4192,7 @@ function GuardianConnectionModal({
   onClose,
   onOpenLink,
 }: {
-  session: Session;
+  session: SessionUser;
   links: ApiLink[];
   reloadLinks: () => Promise<void>;
   toast: (toast: Toast) => void;
