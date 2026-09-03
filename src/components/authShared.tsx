@@ -42,6 +42,32 @@ export function normalizePhone(value: string) {
 
 export const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
+export const RESIDENT_FRONT_PATTERN = /^\d{6}$/
+export const RESIDENT_BACK_PATTERN = /^[1-4]$/
+
+/**
+ * 주민등록번호 앞 6자리와 뒷자리 첫 숫자를 YYYY-MM-DD로 환산합니다. 서버
+ * LinkService.birthDateOf와 같은 규칙입니다 — 주민등록번호 자체는 어디에도 보내거나
+ * 저장하지 않고, 이 결과(생년월일)만 회원가입 시 USER_INFO.BIRTH_DATE에 남습니다.
+ *
+ * 뒷자리 첫 숫자는 세기를 정하는 데만 씁니다(1·2 → 1900년대, 3·4 → 2000년대).
+ */
+export function residentToBirthDate(residentFront: string, residentBackFirst: string): string | null {
+  if (!RESIDENT_FRONT_PATTERN.test(residentFront)) return null
+  if (!RESIDENT_BACK_PATTERN.test(residentBackFirst)) return null
+
+  const century = residentBackFirst <= '2' ? '19' : '20'
+  const year = century + residentFront.slice(0, 2)
+  const month = residentFront.slice(2, 4)
+  const day = residentFront.slice(4, 6)
+
+  const monthValue = Number(month)
+  const dayValue = Number(day)
+  if (monthValue < 1 || monthValue > 12 || dayValue < 1 || dayValue > 31) return null
+
+  return `${year}-${month}-${day}`
+}
+
 export const AUTH_INPUT_CLASS =
   'h-16 w-full rounded-2xl border-2 border-slate-200 bg-slate-50 px-5 text-xl font-semibold outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:bg-white'
 

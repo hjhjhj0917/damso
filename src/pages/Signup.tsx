@@ -3,8 +3,11 @@ import { Link, useNavigate } from 'react-router-dom'
 import {
   AUTH_INPUT_CLASS,
   EMAIL_PATTERN,
+  RESIDENT_BACK_PATTERN,
+  RESIDENT_FRONT_PATTERN,
   normalizeId,
   normalizePhone,
+  residentToBirthDate,
   type AccountType,
 } from '../components/authShared'
 import { checkIdExists, errorMessage, signup } from '../utils/api'
@@ -20,6 +23,8 @@ function Signup() {
   const [password, setPassword] = useState('')
   const [passwordConfirm, setPasswordConfirm] = useState('')
   const [name, setName] = useState('')
+  const [residentFront, setResidentFront] = useState('')
+  const [residentBackFirst, setResidentBackFirst] = useState('')
   const [phone, setPhone] = useState('')
   const [email, setEmail] = useState('')
   const [checkStatus, setCheckStatus] = useState<CheckStatus>('idle')
@@ -87,6 +92,15 @@ function Signup() {
       setError('이름을 2자 이상 입력해 주세요.')
       return
     }
+    if (!RESIDENT_FRONT_PATTERN.test(residentFront) || !RESIDENT_BACK_PATTERN.test(residentBackFirst)) {
+      setError('주민등록번호를 정확히 입력해 주세요.')
+      return
+    }
+    const birthDate = residentToBirthDate(residentFront, residentBackFirst)
+    if (!birthDate) {
+      setError('주민등록번호를 정확히 입력해 주세요.')
+      return
+    }
     const normalizedPhone = normalizePhone(phone)
     if (!/^01[016789]\d{7,8}$/.test(normalizedPhone)) {
       setError('올바른 전화번호를 입력해 주세요.')
@@ -105,6 +119,7 @@ function Signup() {
       phone: normalizedPhone,
       email: email.trim().toLowerCase(),
       roles: accountType === 'guardian' ? 'GUARDIAN' : 'USER',
+      birthDate,
     })
     setIsSubmitting(false)
 
@@ -193,6 +208,30 @@ function Signup() {
               {passwordConfirm.length > 0 && password !== passwordConfirm && <Message error>비밀번호가 일치하지 않습니다.</Message>}
             </Field>
             <Field label="이름"><input value={name} onChange={(event) => { setName(event.target.value); setError('') }} placeholder="이름을 입력하세요" className={AUTH_INPUT_CLASS} /></Field>
+            <div>
+              <label className="mb-2 block text-lg font-extrabold text-slate-800">주민등록번호</label>
+              <div className="flex items-center gap-2">
+                <input
+                  value={residentFront}
+                  onChange={(event) => { setResidentFront(event.target.value.replace(/\D/g, '').slice(0, 6)); setError('') }}
+                  inputMode="numeric"
+                  placeholder="앞 6자리"
+                  className={`${AUTH_INPUT_CLASS} min-w-0 flex-1`}
+                />
+                <span className="font-black text-slate-400">-</span>
+                <div className={`${AUTH_INPUT_CLASS} flex min-w-0 flex-1 items-center`}>
+                  <input
+                    value={residentBackFirst}
+                    onChange={(event) => { setResidentBackFirst(event.target.value.replace(/\D/g, '').slice(0, 1)); setError('') }}
+                    inputMode="numeric"
+                    placeholder="1"
+                    className="w-6 bg-transparent font-semibold outline-none"
+                  />
+                  <span className="ml-1 font-black tracking-[0.12em] text-slate-400">******</span>
+                </div>
+              </div>
+              <Message>보호자 계정을 연결할 때 본인 확인에 사용되며, 주민등록번호는 저장되지 않고 생년월일만 남습니다.</Message>
+            </div>
             <Field label="전화번호"><input value={phone} onChange={(event) => { setPhone(event.target.value.replace(/\D/g, '').slice(0, 11)); setError('') }} type="tel" inputMode="numeric" placeholder="01012345678" className={AUTH_INPUT_CLASS} /></Field>
 
             <Field label="이메일">

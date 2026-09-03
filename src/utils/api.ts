@@ -137,6 +137,8 @@ export const signup = (params: {
   phone: string
   email: string
   roles: 'USER' | 'GUARDIAN'
+  /** YYYY-MM-DD. 주민등록번호 앞 6자리·뒷자리 첫 숫자를 프론트에서 환산한 값입니다. */
+  birthDate: string
 }) => post('/api/user/create', params)
 
 // ================= 로그인 =================
