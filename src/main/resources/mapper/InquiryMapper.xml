@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTO Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="hanium.damso.mapper.IInquiryMapper">
+    <sql id="alive">
+        FROM INQUIRY I
+        WHERE I.IS_DELETED = 'N'
+    </sql>
+
+    <!--
+        ANSWERED_BY는 뽑지 않는다. 감사용으로 남기는 값이지, 문의한 사람에게 담당자 계정을
+        알려 줄 이유가 없다.
+    -->
+    <sql id="columns">
+        I.INQUIRY_ID AS ID,
+        I.USER_ID,
+        I.CATEGORY,
+        I.TITLE,
+        I.CONTENT,
+        I.STATUS,
+        I.ANSWER,
+        DATE_FORMAT(I.CREATED_AT, '%Y-%m-%d') AS `DATE`,
+        UNIX_TIMESTAMP(I.ANSWERED_AT) * 1000 AS ANSWERED_AT,
+        UNIX_TIMESTAMP(I.CREATED_AT) * 1000 AS CREATED_AT,
+        UNIX_TIMESTAMP(I.UPDATED_AT) * 1000 AS UPDATED_AT
+    </sql>
+
+    <select id="selectList" resultType="hanium.damso.dto.InquiryDTO">
+        SELECT <include refid="columns"/>
+        <include refid="alive"/>
+          AND I.USER_ID = #{userId}
+        ORDER BY I.CREATED_AT DESC, I.INQUIRY_ID DESC
+    </select>
+
+    <select id="selectInquiry" resultType="hanium.damso.dto.InquiryDTO">
+        SELECT <include refid="columns"/>
+        <include refid="alive"/>
+          AND I.INQUIRY_ID = #{id}
+    </select>
+
+    <insert id="insertInquiry">
+        INSERT INTO INQUIRY (INQUIRY_ID, USER_ID, CATEGORY, TITLE, CONTENT, STATUS)
+        VALUES (#{id}, #{userId}, #{category}, #{title}, #{content}, #{status})
+    </insert>
+
+    <!--
+        ANSWERED_AT은 답변 본문이 올 때만 찍는다. 상태만 '답변중'으로 올리는 경우가 있는데,
+        그때 시각을 남기면 화면이 답변 없는 "답변 시각"을 갖게 된다.
+    -->
+    <update id="updateAnswer">
+        UPDATE INQUIRY
+        <set>
+            <if test="answer != null">
+                ANSWER = #{answer},
+                ANSWERED_BY = #{answeredBy},
+                ANSWERED_AT = NOW(),
+            </if>
+            <if test="status != null">STATUS = #{status},</if>
+        </set>
+        WHERE INQUIRY_ID = #{id}
+          AND IS_DELETED = 'N'
+    </update>
+</mapper>
