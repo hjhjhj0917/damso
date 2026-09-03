@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTO Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="hanium.damso.mapper.IContentMapper">
+    <insert id="insertContent">
+        INSERT INTO CONTENT_MASTER (CONTENT_ID, USER_ID, CONTENT_TYPE)
+        VALUES (#{contentId}, #{userId}, #{contentType})
+    </insert>
+
+    <select id="getContent" resultType="hanium.damso.dto.ContentDTO">
+        SELECT CONTENT_ID,
+               USER_ID,
+               CONTENT_TYPE,
+               UNIX_TIMESTAMP(CREATED_AT) * 1000 AS CREATED_AT,
+               UNIX_TIMESTAMP(UPDATED_AT) * 1000 AS UPDATED_AT
+        FROM CONTENT_MASTER
+        WHERE CONTENT_ID = #{contentId}
+          AND IS_DELETED = 'N'
+    </select>
+
+    <!--
+        ON UPDATE CURRENT_TIMESTAMP는 이 행 자체가 UPDATE될 때만 발화한다. 일기 본문을 고친 것은
+        DIARY를 건드린 것이지 여기를 건드린 게 아니므로, 자식을 고친 서비스가 이걸 불러서 알린다.
+        빠뜨려도 에러는 나지 않는다 — "최근 수정순" 정렬이 조용히 얼어붙을 뿐이다.
+    -->
+    <update id="touch">
+        UPDATE CONTENT_MASTER
+        SET UPDATED_AT = NOW()
+        WHERE CONTENT_ID = #{contentId}
+          AND IS_DELETED = 'N'
+    </update>
+
+    <!--
+        소유자 조건을 UPDATE문 안에 둔다. 밖에서 먼저 확인하고 지우면 그 사이에 소유자가 바뀔 수
+        있고(연결 해제, 탈퇴), 무엇보다 확인을 빠뜨린 호출자가 남의 글을 지울 수 있게 된다.
+        여기 있으면 권한이 없을 때 조용히 0행이 바뀐다.
+
+        행을 지우지 않는다. CONTENT_MASTER를 진짜로 DELETE하면 자식이 ON DELETE CASCADE로 따라
+        지워지고, DIARY_COMMENT까지 두 단계로 전파된다.
+    -->
+    <update id="deleteContent">
+        UPDATE CONTENT_MASTER
+        SET IS_DELETED = 'Y',
+            UPDATED_AT = NOW()
+        WHERE CONTENT_ID = #{contentId}
+          AND USER_ID = #{userId}
+          AND IS_DELETED = 'N'
+    </update>
+</mapper>

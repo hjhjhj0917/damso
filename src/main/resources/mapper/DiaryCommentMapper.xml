@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTO Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="hanium.damso.mapper.IDiaryCommentMapper">
+    <sql id="columns">
+        C.COMMENT_ID AS ID,
+        C.DIARY_ID,
+        C.AUTHOR_ID,
+        U.USER_NAME AS AUTHOR_NAME,
+        U.ROLES AS AUTHOR_ROLES,
+        C.CONTENT,
+        UNIX_TIMESTAMP(C.CREATED_AT) * 1000 AS CREATED_AT,
+        UNIX_TIMESTAMP(C.UPDATED_AT) * 1000 AS UPDATED_AT
+    </sql>
+
+    <select id="selectCommentList" resultType="hanium.damso.dto.DiaryDTO$CommentDTO">
+        SELECT <include refid="columns"/>
+        FROM DIARY_COMMENT C
+        JOIN USER_INFO U ON U.USER_ID = C.AUTHOR_ID
+        WHERE C.DIARY_ID = #{diaryId}
+          AND C.IS_DELETED = 'N'
+        ORDER BY C.CREATED_AT, C.COMMENT_ID
+    </select>
+
+    <select id="selectComment" resultType="hanium.damso.dto.DiaryDTO$CommentDTO">
+        SELECT <include refid="columns"/>
+        FROM DIARY_COMMENT C
+        JOIN USER_INFO U ON U.USER_ID = C.AUTHOR_ID
+        WHERE C.COMMENT_ID = #{commentId}
+          AND C.IS_DELETED = 'N'
+    </select>
+
+    <!-- AUTHOR_ID는 세션에서 온 값만 들어온다. 요청 파라미터로 받는 경로가 없어야 한다. -->
+    <insert id="insertComment">
+        INSERT INTO DIARY_COMMENT (COMMENT_ID, DIARY_ID, AUTHOR_ID, CONTENT)
+        VALUES (#{id}, #{diaryId}, #{authorId}, #{content})
+    </insert>
+
+    <update id="updateComment">
+        UPDATE DIARY_COMMENT
+        SET CONTENT = #{content}
+        WHERE COMMENT_ID = #{commentId}
+          AND AUTHOR_ID = #{authorId}
+          AND IS_DELETED = 'N'
+    </update>
+
+    <update id="deleteCommentByAuthor">
+        UPDATE DIARY_COMMENT
+        SET IS_DELETED = 'Y',
+            DELETED_AT = NOW()
+        WHERE COMMENT_ID = #{commentId}
+          AND AUTHOR_ID = #{authorId}
+          AND IS_DELETED = 'N'
+    </update>
+
+    <update id="deleteCommentByDiaryOwner">
+        UPDATE DIARY_COMMENT C
+        JOIN DIARY D ON D.DIARY_ID = C.DIARY_ID
+        JOIN CONTENT_MASTER CM ON CM.CONTENT_ID = D.CONTENT_ID
+        SET C.IS_DELETED = 'Y',
+            C.DELETED_AT = NOW()
+        WHERE C.COMMENT_ID = #{commentId}
+          AND CM.USER_ID = #{ownerId}
+          AND CM.IS_DELETED = 'N'
+          AND C.IS_DELETED = 'N'
+    </update>
+</mapper>
