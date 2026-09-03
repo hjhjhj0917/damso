@@ -1,18 +1,16 @@
 import { type FormEvent, type ReactNode, useEffect, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
-import { loadStored } from '../utils/appData'
+import { Link, useSearchParams } from 'react-router-dom'
+import {
+  createInquiry,
+  errorMessage,
+  fetchInquiries,
+  type ApiInquiry,
+  type ApiInquiryCategory,
+  type ApiInquiryStatus,
+} from '../utils/api'
+import { formatDate, inquiryCategoryLabels, inquiryStatusLabels } from '../utils/appData'
 
 type SupportTab = 'faq' | 'privacy' | 'inquiry'
-type InquiryStatus = '접수완료' | '답변중' | '답변완료'
-type Inquiry = {
-  id: number
-  category: string
-  title: string
-  content: string
-  createdAt: string
-  status: InquiryStatus
-  answer?: string
-}
 
 const tabs: Array<{ id: SupportTab; label: string; icon: string; description: string }> = [
   { id: 'faq', label: '자주 묻는 질문', icon: '？', description: '빠르게 답을 찾아보세요' },
@@ -28,11 +26,6 @@ const faqs = [
   { category: '계정', question: '피보호인 계정은 나중에 연결해도 되나요?', answer: '네. 보호자 회원가입 때 ‘나중에 등록하기’를 선택한 뒤 마이페이지의 ‘피보호인 계정 연동하기’에서 본인확인 후 연결할 수 있습니다.' },
   { category: '개인정보', question: '회원탈퇴를 하면 기록은 어떻게 되나요?', answer: '탈퇴 시 관계 법령에 따라 보존해야 하는 정보를 제외한 계정, 대화, 데일리노트와 건강 기록을 지체 없이 파기합니다. 법정 보존 정보는 분리 보관 후 기간이 지나면 파기합니다.' },
   { category: '음성 이용', question: '음성으로 말하기 어려운 경우에도 이용할 수 있나요?', answer: '네. AI 파트너 화면에서 문자로도 대화할 수 있으며, 음성과 문자를 섞어서 사용해도 하나의 하루 기록으로 정리됩니다.' },
-]
-
-const initialInquiries: Inquiry[] = [
-  { id: 1002, category: '병원 예약', title: '예약 시간을 변경하고 싶어요', content: '7월 3일 오후 예약을 오전으로 변경할 수 있을까요?', createdAt: '2026.07.01', status: '답변완료', answer: '늘봄내과에 확인한 결과 오전 11시로 변경 가능합니다. 일정 캘린더에도 변경된 시간이 반영되었습니다.' },
-  { id: 1001, category: '건강 리포트', title: '안심 지수는 어떻게 계산되나요?', content: '건강 리포트의 안심 지수 기준이 궁금합니다.', createdAt: '2026.06.29', status: '답변중' },
 ]
 
 const isSupportTab = (value: string | null): value is SupportTab =>
@@ -139,32 +132,81 @@ function DataTable({ rows }: { rows: string[][] }) {
   return <div className="overflow-hidden rounded-xl border border-slate-200">{rows.map(([label, value]) => <div key={label} className="grid border-b border-slate-100 last:border-0 sm:grid-cols-[150px_1fr]"><b className="bg-slate-50 px-4 py-3 text-sm text-slate-700">{label}</b><p className="px-4 py-3 text-sm leading-6">{value}</p></div>)}</div>
 }
 
+/**
+ * 문의 접수와 답변 확인.
+ *
+ * 목록은 서버(INQUIRY 표)가 갖고 있고 내가 쓴 것만 돌아옵니다. 답변과 상태를 옮기는 것은
+ * 운영자뿐이라 이 화면에는 쓰기가 '접수' 하나뿐입니다.
+ *
+ * 이 페이지는 로그인 없이도 열리지만 문의는 계정에 딸리므로, 세션이 없으면(INVALID_ACCESS)
+ * 빈 목록 대신 로그인 안내를 그립니다 — 빈 목록만 보여 주면 남긴 문의가 사라진 것처럼 보입니다.
+ */
 function InquiryView() {
-  const [inquiries, setInquiries] = useState<Inquiry[]>(() => loadStored('damsoInquiries', initialInquiries))
+  const [inquiries, setInquiries] = useState<ApiInquiry[]>([])
+  const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState('')
+  const [needsLogin, setNeedsLogin] = useState(false)
+
   const [showForm, setShowForm] = useState(false)
-  const [selected, setSelected] = useState<Inquiry | null>(null)
-  const [category, setCategory] = useState('서비스 이용')
+  const [selected, setSelected] = useState<ApiInquiry | null>(null)
+  const [category, setCategory] = useState<ApiInquiryCategory>('SERVICE')
   const [title, setTitle] = useState('')
   const [content, setContent] = useState('')
-  useEffect(() => localStorage.setItem('damsoInquiries', JSON.stringify(inquiries)), [inquiries])
+  const [submitting, setSubmitting] = useState(false)
+  const [formError, setFormError] = useState('')
 
-  const submit = (event: FormEvent) => {
+  useEffect(() => {
+    let cancelled = false
+
+    void fetchInquiries().then((result) => {
+      if (cancelled) return
+
+      if (result.status === 'success') setInquiries(result.data ?? [])
+      else if (result.code === 'INVALID_ACCESS') setNeedsLogin(true)
+      else setLoadError(errorMessage(result))
+
+      setLoading(false)
+    })
+
+    return () => { cancelled = true }
+  }, [])
+
+  const submit = async (event: FormEvent) => {
     event.preventDefault()
-    if (!title.trim() || content.trim().length < 10) return
-    const inquiry: Inquiry = { id: Date.now(), category, title: title.trim(), content: content.trim(), createdAt: new Date().toLocaleDateString('ko-KR').replaceAll(' ', ''), status: '접수완료' }
-    setInquiries((value) => [inquiry, ...value]); setTitle(''); setContent(''); setShowForm(false); setSelected(inquiry)
+    if (submitting || !title.trim() || content.trim().length < 10) return
+
+    setSubmitting(true)
+    setFormError('')
+    const result = await createInquiry({ category, title: title.trim(), content: content.trim() })
+    setSubmitting(false)
+
+    const created = result.data
+    if (result.status !== 'success' || !created) {
+      // 접수에 실패하면 폼을 닫지 않습니다. 여기서 닫으면 방금 쓴 글이 어디에도 남지 않습니다.
+      if (result.code === 'INVALID_ACCESS') setNeedsLogin(true)
+      setFormError(errorMessage(result))
+      return
+    }
+
+    setInquiries((value) => [created, ...value])
+    setTitle(''); setContent(''); setShowForm(false); setSelected(created)
   }
 
+  if (needsLogin) return <div>
+    <SectionTitle eyebrow="1:1 INQUIRY" title="1:1 문의" description="문의 접수와 담당자의 답변 상태를 한곳에서 확인하세요." />
+    <div className="rounded-[1.5rem] border border-slate-200 bg-white p-10 text-center shadow-sm"><p className="text-lg font-black text-slate-800">로그인 후 이용할 수 있습니다.</p><p className="mt-2 text-sm text-slate-500">문의 내역은 계정에 저장되어 본인만 확인할 수 있습니다.</p><Link to="/?login=true" className="mt-6 inline-flex rounded-xl bg-blue-600 px-6 py-3 text-sm font-black text-white shadow-lg shadow-blue-200">로그인하기</Link></div>
+  </div>
+
   return <div>
-    <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end"><SectionTitle eyebrow="1:1 INQUIRY" title="1:1 문의" description="문의 접수와 담당자의 답변 상태를 한곳에서 확인하세요." /><button onClick={() => setShowForm(!showForm)} className="mb-7 rounded-xl bg-blue-600 px-5 py-3 text-sm font-black text-white shadow-lg shadow-blue-200">{showForm ? '문의내역 보기' : '새 문의 작성'}</button></div>
-    {showForm ? <form onSubmit={submit} className="rounded-[1.5rem] border border-slate-200 bg-white p-6 shadow-sm sm:p-8"><label className="block"><span className="mb-2 block text-sm font-black">문의 카테고리</span><select value={category} onChange={(event) => setCategory(event.target.value)} className="h-13 w-full rounded-xl border-2 border-slate-200 bg-white px-4 font-bold outline-none focus:border-blue-500">{['서비스 이용','계정·피보호인 연동','AI 대화·기록','건강 리포트','병원 예약','개인정보','결제·환불','기타'].map((item) => <option key={item}>{item}</option>)}</select></label><label className="mt-5 block"><span className="mb-2 block text-sm font-black">제목</span><input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="문의 제목을 입력하세요" className="h-13 w-full rounded-xl border-2 border-slate-200 px-4 font-bold outline-none focus:border-blue-500" /></label><label className="mt-5 block"><span className="mb-2 block text-sm font-black">문의 내용</span><textarea value={content} onChange={(event) => setContent(event.target.value)} placeholder="문의하실 내용을 10자 이상 자세히 적어주세요." rows={7} className="w-full resize-none rounded-xl border-2 border-slate-200 p-4 font-medium leading-7 outline-none focus:border-blue-500" /></label><p className="mt-2 text-right text-xs font-bold text-slate-400">{content.length}자</p><div className="mt-6 flex justify-end gap-3"><button type="button" onClick={() => setShowForm(false)} className="rounded-xl bg-slate-100 px-5 py-3 font-black">취소</button><button disabled={!title.trim() || content.trim().length < 10} className="rounded-xl bg-blue-600 px-6 py-3 font-black text-white disabled:bg-slate-300">문의 접수</button></div></form> : <div className="space-y-3">{inquiries.map((inquiry) => <button key={inquiry.id} onClick={() => setSelected(inquiry)} className="flex w-full flex-col gap-4 rounded-2xl border border-slate-200 bg-white p-5 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md sm:flex-row sm:items-center"><span className="min-w-0 flex-1"><span className="text-xs font-black text-blue-600">{inquiry.category}</span><b className="mt-1 block truncate text-lg">{inquiry.title}</b><span className="mt-2 block text-xs text-slate-400">문의번호 {inquiry.id} · {inquiry.createdAt}</span></span><StatusBadge status={inquiry.status} /><span className="hidden text-xl text-slate-300 sm:block">›</span></button>)}{inquiries.length === 0 && <div className="rounded-2xl bg-white p-14 text-center text-slate-400">아직 문의내역이 없습니다.</div>}</div>}
-    {selected && <SupportModal onClose={() => setSelected(null)}><div className="flex items-center gap-2"><span className="text-sm font-black text-blue-600">{selected.category}</span><StatusBadge status={selected.status} /></div><h3 className="mt-3 pr-10 text-2xl font-black">{selected.title}</h3><p className="mt-2 text-xs text-slate-400">문의번호 {selected.id} · {selected.createdAt}</p><div className="mt-6 rounded-2xl bg-slate-50 p-5"><p className="text-xs font-black text-slate-400">문의 내용</p><p className="mt-2 whitespace-pre-line text-sm leading-7 text-slate-600">{selected.content}</p></div>{selected.answer ? <div className="mt-4 rounded-2xl bg-blue-50 p-5"><p className="text-xs font-black text-blue-600">담소 고객센터 답변</p><p className="mt-2 text-sm leading-7 text-slate-700">{selected.answer}</p></div> : <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-5"><p className="font-black text-amber-800">담당자가 문의를 확인하고 있습니다.</p><p className="mt-1 text-sm text-amber-700">답변이 등록되면 알림으로 알려드릴게요.</p></div>}<button onClick={() => setSelected(null)} className="mt-6 w-full rounded-xl bg-slate-900 py-3 font-black text-white">확인</button></SupportModal>}
+    <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end"><SectionTitle eyebrow="1:1 INQUIRY" title="1:1 문의" description="문의 접수와 담당자의 답변 상태를 한곳에서 확인하세요." /><button onClick={() => { setShowForm(!showForm); setFormError('') }} className="mb-7 rounded-xl bg-blue-600 px-5 py-3 text-sm font-black text-white shadow-lg shadow-blue-200">{showForm ? '문의내역 보기' : '새 문의 작성'}</button></div>
+    {showForm ? <form onSubmit={submit} className="rounded-[1.5rem] border border-slate-200 bg-white p-6 shadow-sm sm:p-8"><label className="block"><span className="mb-2 block text-sm font-black">문의 카테고리</span><select value={category} onChange={(event) => setCategory(event.target.value as ApiInquiryCategory)} className="h-13 w-full rounded-xl border-2 border-slate-200 bg-white px-4 font-bold outline-none focus:border-blue-500">{Object.entries(inquiryCategoryLabels).map(([code, label]) => <option key={code} value={code}>{label}</option>)}</select></label><label className="mt-5 block"><span className="mb-2 block text-sm font-black">제목</span><input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="문의 제목을 입력하세요" className="h-13 w-full rounded-xl border-2 border-slate-200 px-4 font-bold outline-none focus:border-blue-500" /></label><label className="mt-5 block"><span className="mb-2 block text-sm font-black">문의 내용</span><textarea value={content} onChange={(event) => setContent(event.target.value)} placeholder="문의하실 내용을 10자 이상 자세히 적어주세요." rows={7} className="w-full resize-none rounded-xl border-2 border-slate-200 p-4 font-medium leading-7 outline-none focus:border-blue-500" /></label><p className="mt-2 text-right text-xs font-bold text-slate-400">{content.length}자</p>{formError && <p className="mt-3 rounded-xl bg-red-50 px-4 py-3 text-sm font-bold text-red-600">{formError}</p>}<div className="mt-6 flex justify-end gap-3"><button type="button" onClick={() => setShowForm(false)} className="rounded-xl bg-slate-100 px-5 py-3 font-black">취소</button><button disabled={submitting || !title.trim() || content.trim().length < 10} className="rounded-xl bg-blue-600 px-6 py-3 font-black text-white disabled:bg-slate-300">{submitting ? '접수 중…' : '문의 접수'}</button></div></form> : <div className="space-y-3">{inquiries.map((inquiry) => <button key={inquiry.id} onClick={() => setSelected(inquiry)} className="flex w-full flex-col gap-4 rounded-2xl border border-slate-200 bg-white p-5 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md sm:flex-row sm:items-center"><span className="min-w-0 flex-1"><span className="text-xs font-black text-blue-600">{inquiryCategoryLabels[inquiry.category]}</span><b className="mt-1 block truncate text-lg">{inquiry.title}</b><span className="mt-2 block text-xs text-slate-400">문의번호 {inquiry.id} · {formatDate(inquiry.date)}</span></span><StatusBadge status={inquiry.status} /><span className="hidden text-xl text-slate-300 sm:block">›</span></button>)}{inquiries.length === 0 && <div className="rounded-2xl bg-white p-14 text-center text-slate-400">{loading ? '문의내역을 불러오는 중이에요.' : loadError || '아직 문의내역이 없습니다.'}</div>}</div>}
+    {selected && <SupportModal onClose={() => setSelected(null)}><div className="flex items-center gap-2"><span className="text-sm font-black text-blue-600">{inquiryCategoryLabels[selected.category]}</span><StatusBadge status={selected.status} /></div><h3 className="mt-3 pr-10 text-2xl font-black">{selected.title}</h3><p className="mt-2 text-xs text-slate-400">문의번호 {selected.id} · {formatDate(selected.date)}</p><div className="mt-6 rounded-2xl bg-slate-50 p-5"><p className="text-xs font-black text-slate-400">문의 내용</p><p className="mt-2 whitespace-pre-line text-sm leading-7 text-slate-600">{selected.content}</p></div>{selected.answer ? <div className="mt-4 rounded-2xl bg-blue-50 p-5"><p className="text-xs font-black text-blue-600">담소 고객센터 답변</p><p className="mt-2 whitespace-pre-line text-sm leading-7 text-slate-700">{selected.answer}</p></div> : <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-5"><p className="font-black text-amber-800">담당자가 문의를 확인하고 있습니다.</p><p className="mt-1 text-sm text-amber-700">답변이 등록되면 알림으로 알려드릴게요.</p></div>}<button onClick={() => setSelected(null)} className="mt-6 w-full rounded-xl bg-slate-900 py-3 font-black text-white">확인</button></SupportModal>}
   </div>
 }
 
-function StatusBadge({ status }: { status: InquiryStatus }) {
-  const colors: Record<InquiryStatus, string> = { 접수완료: 'bg-slate-100 text-slate-600', 답변중: 'bg-amber-100 text-amber-700', 답변완료: 'bg-emerald-100 text-emerald-700' }
-  return <span className={`inline-flex w-fit shrink-0 rounded-full px-3 py-1.5 text-xs font-black ${colors[status]}`}>{status}</span>
+function StatusBadge({ status }: { status: ApiInquiryStatus }) {
+  const colors: Record<ApiInquiryStatus, string> = { RECEIVED: 'bg-slate-100 text-slate-600', ANSWERING: 'bg-amber-100 text-amber-700', ANSWERED: 'bg-emerald-100 text-emerald-700' }
+  return <span className={`inline-flex w-fit shrink-0 rounded-full px-3 py-1.5 text-xs font-black ${colors[status]}`}>{inquiryStatusLabels[status]}</span>
 }
 
 function SupportModal({ children, onClose }: { children: ReactNode; onClose: () => void }) {

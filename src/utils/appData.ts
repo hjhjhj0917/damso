@@ -10,7 +10,13 @@
  * 24시간제 HH:mm으로, 상태를 영문 상수로 줍니다. 한국어 표기를 만드는 일은 화면의 몫입니다.
  */
 
-import type { ApiNoticeCategory, ApiSchedule, ApiScheduleType } from './api'
+import type {
+  ApiInquiryCategory,
+  ApiInquiryStatus,
+  ApiNoticeCategory,
+  ApiSchedule,
+  ApiScheduleType,
+} from './api'
 
 export const navItems = [
   { id: 'home', label: '홈', icon: '⌂' },
@@ -162,6 +168,25 @@ export const noticeCategoryLabels: Record<ApiNoticeCategory, string> = {
   SAFETY: '안전 안내',
   UPDATE: '업데이트',
   GENERAL: '일반 공지',
+}
+
+/** 1:1 문의 분류 라벨. 서버는 INQUIRY.CATEGORY의 영문 상수로 주고 한국어는 여기서 붙입니다. */
+export const inquiryCategoryLabels: Record<ApiInquiryCategory, string> = {
+  SERVICE: '서비스 이용',
+  ACCOUNT: '계정·피보호인 연동',
+  RECORD: 'AI 대화·기록',
+  HEALTH: '건강 리포트',
+  HOSPITAL: '병원 예약',
+  PRIVACY: '개인정보',
+  PAYMENT: '결제·환불',
+  ETC: '기타',
+}
+
+/** 1:1 문의 상태 라벨. */
+export const inquiryStatusLabels: Record<ApiInquiryStatus, string> = {
+  RECEIVED: '접수완료',
+  ANSWERING: '답변중',
+  ANSWERED: '답변완료',
 }
 
 /** 자서전 상태 라벨. */

@@ -454,6 +454,54 @@ export type ApiNotice = {
 /** 조회 전용입니다. 등록·수정은 운영자가 DB에서 합니다 — 서버에 쓰기 엔드포인트가 없습니다. */
 export const fetchNotices = () => get<ApiNotice[]>('/api/notice/list')
 
+// ================= 1:1 문의 =================
+
+export type ApiInquiryCategory =
+  | 'SERVICE'
+  | 'ACCOUNT'
+  | 'RECORD'
+  | 'HEALTH'
+  | 'HOSPITAL'
+  | 'PRIVACY'
+  | 'PAYMENT'
+  | 'ETC'
+
+/** 접수완료 → 답변중 → 답변완료. 상태를 옮기는 것은 운영자뿐입니다. */
+export type ApiInquiryStatus = 'RECEIVED' | 'ANSWERING' | 'ANSWERED'
+
+/**
+ * 서버 InquiryDTO.
+ *
+ * 공지와 달리 주인이 있습니다 — 목록도 상세도 내가 쓴 것만 돌아옵니다. 보호자에게도 열리지
+ * 않습니다(결제·개인정보 문의가 이 자리로 옵니다).
+ *
+ * answer가 없으면 아직 답변 전입니다. 화면은 그 자리에 "확인하고 있습니다"를 그립니다.
+ */
+export type ApiInquiry = {
+  id: string
+  userId?: string
+  category: ApiInquiryCategory
+  title: string
+  content: string
+  status: ApiInquiryStatus
+  answer?: string
+  answeredAt?: number
+  /** 접수일 YYYY-MM-DD. 표시용 서식은 화면이 만듭니다. */
+  date: string
+  createdAt?: number
+  updatedAt?: number
+}
+
+/** 내가 남긴 문의만 돌아옵니다. 목록에 본문과 답변까지 실려 오므로 상세 조회를 따로 하지 않습니다. */
+export const fetchInquiries = () => get<ApiInquiry[]>('/api/inquiry/list')
+
+/** 본문은 10자 이상이어야 합니다. 짧으면 서버가 INVALID_PARAMETER로 돌려보냅니다. */
+export const createInquiry = (params: {
+  category: ApiInquiryCategory
+  title: string
+  content: string
+}) => post<ApiInquiry>('/api/inquiry/create', params)
+
 // ================= 음성 =================
 //
 // 두 엔드포인트의 모양이 서로 다릅니다. transcribe는 봉투를 돌려주지만 보내는 것이 폼이 아니라
