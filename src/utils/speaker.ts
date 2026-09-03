@@ -13,7 +13,18 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { speak as requestSpeech } from './api'
 
-export function useSpeaker(options: { onError?: (code: string) => void } = {}) {
+export function useSpeaker(
+  options: {
+    onError?: (code: string) => void
+    /**
+     * 한 말풍선을 **끝까지** 읽어 준 순간입니다. 중간에 멈춘 경우에는 오지 않습니다 —
+     * `stop()`은 `pause()`라서 `ended`가 뜨지 않습니다.
+     *
+     * "도담이 말을 마쳤다"를 아는 곳은 여기뿐입니다. 이어 말하기(마이크 자동 열기)가 이걸 봅니다.
+     */
+    onEnded?: (id: string) => void
+  } = {},
+) {
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const urlRef = useRef<string | null>(null)
   const abortRef = useRef<AbortController | null>(null)
@@ -24,7 +35,7 @@ export function useSpeaker(options: { onError?: (code: string) => void } = {}) {
   /** 서버에 음성을 부탁해 둔 말풍선. 도착까지 한두 박자 걸립니다. */
   const [loadingId, setLoadingId] = useState<string | null>(null)
 
-  const { onError } = options
+  const { onError, onEnded } = options
 
   /** 필요할 때 하나 만들고, 그 다음부터는 같은 것을 씁니다. */
   const element = useCallback(() => {
@@ -85,16 +96,19 @@ export function useSpeaker(options: { onError?: (code: string) => void } = {}) {
    *
    * 앞선 재생과 앞선 요청은 여기서 끊깁니다 — 두 목소리가 겹쳐 나오는 것보다는 늦게 누른 쪽만
    * 들리는 편이 낫습니다.
+   *
+   * 소리가 실제로 나기 시작했으면 `true`입니다. `false`면 `onEnded`도 오지 않습니다 —
+   * 그때까지 기다리는 쪽이 영영 기다리지 않도록.
    */
   const speak = useCallback(
-    async (id: string, text: string) => {
+    async (id: string, text: string): Promise<boolean> => {
       if (speakingId === id || loadingId === id) {
         stop()
-        return
+        return false
       }
 
       stop()
-      if (!text.trim()) return
+      if (!text.trim()) return false
 
       const controller = new AbortController()
       abortRef.current = controller
@@ -102,13 +116,13 @@ export function useSpeaker(options: { onError?: (code: string) => void } = {}) {
 
       const result = await requestSpeech(text, controller.signal)
 
-      if (controller.signal.aborted) return
+      if (controller.signal.aborted) return false
       setLoadingId(null)
 
       if (result.status !== 'success' || !result.blob) {
         // 사용자가 스스로 갈아탄 것은 실패가 아닙니다.
         if (result.code !== 'ABORTED') onError?.(result.code)
-        return
+        return false
       }
 
       const url = URL.createObjectURL(result.blob)
@@ -119,19 +133,22 @@ export function useSpeaker(options: { onError?: (code: string) => void } = {}) {
       audio.onended = () => {
         setSpeakingId(null)
         release()
+        onEnded?.(id)
       }
 
       try {
         await audio.play()
         setSpeakingId(id)
+        return true
       } catch {
         // 자동재생이 막혔습니다. 버튼을 눌러 시작한 재생은 막히지 않으므로, 여기 오는 것은
         // 대개 자동 읽기입니다. 조용히 넘어가고 🔊 버튼을 남겨 둡니다.
         release()
         setSpeakingId(null)
+        return false
       }
     },
-    [element, loadingId, onError, release, speakingId, stop],
+    [element, loadingId, onEnded, onError, release, speakingId, stop],
   )
 
   return { speak, stop, unlock, speakingId, loadingId }

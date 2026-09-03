@@ -1711,6 +1711,15 @@ function FeatureCard({
 }
 
 /**
+ * 도담이 말을 마치고 마이크가 열리기까지의 사이입니다.
+ *
+ * 0으로 두면 스피커의 끝소리가 열리는 마이크로 들어가 "말이 시작됐다"로 잘못 세어지고, 그대로
+ * 2초의 침묵을 기다리다 빈 녹음이 서버로 갑니다. 반대로 길면 이어 말하기가 아니라 기다리기가
+ * 됩니다. 0.6초는 말이 끝났음을 알아차리고 숨을 고르는 데 걸리는 정도입니다.
+ */
+const AUTO_LISTEN_DELAY_MS = 600;
+
+/**
  * 도담과의 대화.
  *
  * 대화방과 메시지는 서버가 갖습니다(CHAT_ROOM / CHAT). 예전에는 ansimChatThreads localStorage에
@@ -1751,8 +1760,59 @@ function ChatView({
   const voiceKey = `damso.voice.${userId}`;
   const [voiceOn, setVoiceOn] = useState(() => loadStored(voiceKey, true));
 
+  /**
+   * 이어 말하기. 목소리로 시작한 차례에 한해, 도담이 답을 다 읽어 주면 마이크가 저절로 열립니다.
+   *
+   * 버튼을 누르지 않고 사람과 이야기하듯 주고받기 위한 것입니다. 기본값은 꺼짐입니다 —
+   * 마이크가 스스로 열리는 것은 누구에게나 놀라운 일이라 먼저 골라 주셔야 합니다.
+   */
+  const handsFreeKey = `damso.handsfree.${userId}`;
+  const [handsFree, setHandsFree] = useState(() => loadStored(handsFreeKey, false));
+  /** 다음 마이크가 예약돼 있는지. 화면에 한 줄로 알려 줍니다. */
+  const [autoMicPending, setAutoMicPending] = useState(false);
+
+  /** 이 배포에서 이어 말하기를 쓸 수 있는지. 듣기·말하기가 모두 있어야 고리가 돌아갑니다. */
+  const handsFreeAvailable = speech.tts && speech.stt && canRecordAudio();
+
+  /** 지금 차례가 목소리로 시작됐는지. 글로 적어 보낸 차례에서는 마이크를 열지 않습니다. */
+  const autoListenIdRef = useRef<string | null>(null);
+  const autoListenTimerRef = useRef<number | null>(null);
+  /** 예약된 마이크가 부를 함수. 몇 초 뒤에 불리므로 **가장 최근 렌더의 것**이어야 합니다. */
+  const listenRef = useRef<() => void>(() => {});
+
+  /** 예약을 무릅니다. 사람이 직접 무언가를 하면 언제나 그쪽이 먼저입니다. */
+  const cancelAutoListen = () => {
+    autoListenIdRef.current = null;
+    if (autoListenTimerRef.current !== null) {
+      window.clearTimeout(autoListenTimerRef.current);
+      autoListenTimerRef.current = null;
+    }
+    setAutoMicPending(false);
+  };
+
+  /**
+   * 읽기가 끝나면 마이크를 엽니다. 곧바로 열지 않고 한 박자 두는 이유: 스피커의 끝소리가
+   * 마이크로 되돌아 들어가면 그 소리를 "말이 시작됐다"로 잘못 셉니다.
+   */
+  const scheduleAutoListen = () => {
+    if (autoListenTimerRef.current !== null) return;
+    setAutoMicPending(true);
+    autoListenTimerRef.current = window.setTimeout(() => {
+      autoListenTimerRef.current = null;
+      setAutoMicPending(false);
+      listenRef.current();
+    }, AUTO_LISTEN_DELAY_MS);
+  };
+
   const speaker = useSpeaker({
     onError: (code) => toast({ message: messageOf(code) }),
+    onEnded: (id) => {
+      // 예약해 둔 그 말풍선이 끝났을 때만입니다. 어르신이 🔊로 예전 말을 다시 들으신 것은
+      // 새 차례가 아닙니다.
+      if (autoListenIdRef.current !== id) return;
+      autoListenIdRef.current = null;
+      scheduleAutoListen();
+    },
   });
 
   /** 마이크가 열릴 때 스피커를 멈춥니다. 안 그러면 도담의 목소리를 그대로 받아 적습니다. */
@@ -1769,6 +1829,14 @@ function ChatView({
   }, [messages]);
 
   useEffect(() => localStorage.setItem(voiceKey, JSON.stringify(voiceOn)), [voiceKey, voiceOn]);
+
+  useEffect(
+    () => localStorage.setItem(handsFreeKey, JSON.stringify(handsFree)),
+    [handsFreeKey, handsFree],
+  );
+
+  /** 화면을 떠나면 예약도 함께 접습니다. 없는 화면의 마이크가 열리는 일이 없도록. */
+  useEffect(() => cancelAutoListen, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -1827,8 +1895,11 @@ function ChatView({
     };
   }, [activeRoomId]);
 
-  const send = async (text: string) => {
+  const send = async (text: string, viaVoice = false) => {
     if (!text.trim() || !activeRoomId || pending) return;
+
+    // 글로 보내신 차례입니다. 앞 차례에 걸어 둔 마이크가 뒤늦게 열릴 자리가 아닙니다.
+    if (!viaVoice) cancelAutoListen();
 
     setInput("");
     setPending(true);
@@ -1848,7 +1919,20 @@ function ChatView({
     // 목록을 다시 불러 messages가 바뀔 때마다 "새 답변"인지 다시 따져야 하고, 한 번이라도 잘못
     // 세면 예전 대화가 저절로 소리를 냅니다. 답이 도착한 자리는 여기 하나뿐입니다.
     if (turn?.reply && voiceOn && speech.tts) {
-      void speaker.speak(turn.reply.id, turn.reply.message);
+      const reply = turn.reply;
+
+      // 목소리로 시작한 차례에만 마이크를 예약합니다. 글로 적어 보내신 분은 화면을 보고 계시고,
+      // 그 앞에서 마이크가 저절로 열리면 놀라실 일입니다.
+      const chain = viaVoice && handsFree && handsFreeAvailable;
+      if (chain) autoListenIdRef.current = reply.id;
+
+      void speaker.speak(reply.id, reply.message).then((played) => {
+        // 소리가 나지 않았으면 `onEnded`도 오지 않습니다(자동재생 차단·TTS 실패). 그래도 답은
+        // 도착했으니 고리를 이어 갑니다 — 여기서 멈추면 이어 말하기가 조용히 죽습니다.
+        if (played || autoListenIdRef.current !== reply.id) return;
+        autoListenIdRef.current = null;
+        scheduleAutoListen();
+      });
     }
 
     if (result.status !== "success") {
@@ -1873,11 +1957,10 @@ function ChatView({
    * 사용자에게 맞고, 잘못 들은 경우에는 다시 말씀하시면 됩니다 — 이미 보낸 말도 대화에 남지만
    * 그것은 사람의 대화에서도 마찬가지입니다.
    */
-  const toggleRecording = async () => {
-    if (recorder.recording) {
-      recorder.stop();
-      return;
-    }
+  const listen = async (auto = false) => {
+    // 예약된 마이크가 뒤늦게 열리는 것을 막습니다. 그 사이에 글을 보내셨거나 이미 녹음 중일 수
+    // 있습니다.
+    if (recorder.recording || pending || transcribing) return;
 
     // 반드시 사용자 조작 안에서. 이 한 번이 있어야 나중에 도착하는 답을 자동으로 읽어 줄 수 있습니다.
     speaker.unlock();
@@ -1887,6 +1970,10 @@ function ChatView({
     if (!take) {
       // 마이크를 막은 것과 아무 말도 없었던 것은 다른 일이고, 사람이 해야 할 일도 다릅니다.
       toast({ message: messageOf(deniedRef.current ? "MIC_DENIED" : "NO_SPEECH") });
+      // 스스로 연 마이크가 막혔다면 이어 말하기를 접습니다. 차례마다 같은 안내가 뜨는 것은
+      // 도움이 아니라 고장입니다. 아무 말씀이 없으셨던 것은 다릅니다 — 그냥 이번 고리가
+      // 여기서 끝나고, 다음은 버튼으로 다시 시작하시면 됩니다.
+      if (auto && deniedRef.current) setHandsFree(false);
       return;
     }
 
@@ -1906,7 +1993,25 @@ function ChatView({
       return;
     }
 
-    void send(text);
+    void send(text, true);
+  };
+
+  // 예약된 마이크는 이 ref를 통해 **이번 렌더의** listen을 부릅니다. 몇 초 전 렌더의 것을 붙들고
+  // 있으면 그 사이에 바뀐 pending·방 번호를 못 보고 열립니다.
+  useEffect(() => {
+    listenRef.current = () => void listen(true);
+  });
+
+  const toggleRecording = async () => {
+    // 버튼을 누른 순간 예약은 의미가 없습니다 — 지금 열거나, 지금 닫거나 둘 중 하나입니다.
+    cancelAutoListen();
+
+    if (recorder.recording) {
+      recorder.stop();
+      return;
+    }
+
+    await listen();
   };
 
   /** 오늘 대화를 데일리노트 한 편으로 정리합니다. 글은 서버의 모델이 씁니다. */
@@ -1928,12 +2033,16 @@ function ChatView({
   };
 
   const openRoom = (room: ApiChatRoom) => {
+    cancelAutoListen();
+    speaker.stop();
     setActiveRoomId(room.id);
     setSaved(false);
     setInput("");
   };
 
   const createNewRoom = async () => {
+    cancelAutoListen();
+    speaker.stop();
     const result = await createChatRoom(`새 대화 ${rooms.length + 1}`);
     if (result.status !== "success" || !result.data) {
       toast({ message: errorMessage(result) });
@@ -1948,6 +2057,8 @@ function ChatView({
   };
 
   const removeRoom = async (room: ApiChatRoom) => {
+    cancelAutoListen();
+    speaker.stop();
     const result = await deleteChatRoom(room.id);
     if (result.status !== "success") {
       toast({ message: errorMessage(result) });
@@ -1983,12 +2094,35 @@ function ChatView({
                 onClick={() => {
                   const next = !voiceOn;
                   setVoiceOn(next);
-                  if (!next) speaker.stop();
+                  if (!next) {
+                    speaker.stop();
+                    // 읽어 주지 않으면 "다 읽었다"는 순간도 없습니다. 이어 말하기가 기다릴 신호가
+                    // 사라지므로 함께 접습니다 — 켜져 있는데 아무 일도 안 일어나는 스위치는
+                    // 고장으로 보입니다.
+                    setHandsFree(false);
+                    cancelAutoListen();
+                  }
                 }}
                 aria-pressed={voiceOn}
                 className={`rounded-xl border px-3 py-2.5 text-xs font-black sm:px-4 sm:text-sm ${voiceOn ? "border-blue-200 bg-blue-50 text-blue-700" : "border-slate-200 bg-white text-slate-400"}`}
               >
                 {voiceOn ? "🔊 음성 켜짐" : "🔇 음성 꺼짐"}
+              </button>
+            )}
+            {handsFreeAvailable && (
+              <button
+                onClick={() => {
+                  const next = !handsFree;
+                  setHandsFree(next);
+                  // 켜는 쪽은 읽어 주기부터 필요합니다. 두 번 누르게 하지 않고 여기서 같이 켭니다.
+                  if (next) setVoiceOn(true);
+                  else cancelAutoListen();
+                }}
+                aria-pressed={handsFree}
+                title="말로 시작한 이야기에서, 도담이 답을 다 읽어 주면 마이크가 저절로 켜집니다."
+                className={`rounded-xl border px-3 py-2.5 text-xs font-black sm:px-4 sm:text-sm ${handsFree ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-slate-200 bg-white text-slate-400"}`}
+              >
+                {handsFree ? "🔄 이어 말하기 켜짐" : "🔄 이어 말하기 꺼짐"}
               </button>
             )}
             <button
@@ -2165,9 +2299,19 @@ function ChatView({
               {transcribing && (
                 <p className="px-2 text-xs font-black text-blue-500">글로 옮기고 있어요…</p>
               )}
+              {/* 마이크가 곧 저절로 열립니다. 미리 말해 두지 않으면 갑자기 켜진 것으로 보입니다. */}
+              {autoMicPending && !recorder.recording && (
+                <p className="px-2 text-xs font-black text-emerald-600">
+                  잠시 후 마이크가 켜져요 · 이어서 말씀해 주세요
+                </p>
+              )}
               <textarea
                 value={input}
-                onChange={(e) => setInput(e.target.value)}
+                onChange={(e) => {
+                  // 손으로 적기 시작하셨습니다. 예약된 마이크가 그 위로 열리지 않게 접습니다.
+                  if (autoMicPending) cancelAutoListen();
+                  setInput(e.target.value);
+                }}
                 rows={1}
                 placeholder="도담에게 오늘 이야기를 들려주세요..."
                 className="max-h-28 w-full resize-none bg-transparent px-2 py-3 text-sm outline-none"
