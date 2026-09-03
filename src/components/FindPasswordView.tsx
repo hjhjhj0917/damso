@@ -1,12 +1,7 @@
 import { useState } from "react";
-import {
-  AUTH_INPUT_CLASS,
-  getSavedUsers,
-  normalizeId,
-  saveSavedUsers,
-  useEmailVerification,
-} from "./authShared";
+import { AUTH_INPUT_CLASS, normalizeId, useEmailVerification } from "./authShared";
 import { ModalTitle } from "./ModalTitle";
+import { errorMessage, resetNewPassword, resetSendCode, resetVerifyCode } from "../utils/api";
 
 export function FindPasswordView({ onBack }: { onBack: () => void }) {
   const [userId, setUserId] = useState("");
@@ -14,18 +9,19 @@ export function FindPasswordView({ onBack }: { onBack: () => void }) {
   const [passwordConfirm, setPasswordConfirm] = useState("");
   const [isReset, setIsReset] = useState(false);
 
-  const matchedUser = (email: string) =>
-    getSavedUsers().find(
-      (user) =>
-        normalizeId(user.id) === normalizeId(userId) &&
-        user.email?.toLowerCase() === email.toLowerCase(),
-    );
-
+  /*
+   * 서버의 3단계 흐름을 그대로 따릅니다.
+   *
+   *   searchPassword    아이디+이메일이 맞는 계정을 찾아 그 주소로 코드 발송
+   *   verifyResetCode   코드를 갖고 있음을 증명 -> 비밀번호를 바꿀 권한 획득
+   *   newPassword       새 비밀번호 저장
+   *
+   * 아이디와 이메일은 알아낼 수 있는 값이라 그 둘만으로는 아무 권한도 생기지 않습니다.
+   * 실제 권한은 메일로 받은 코드를 확인한 순간에만 생깁니다.
+   */
   const verification = useEmailVerification({
-    onBeforeSend: (email) => {
-      if (!userId.trim()) return "아이디를 입력해 주세요.";
-      return matchedUser(email) ? null : "입력한 정보와 일치하는 계정이 없습니다.";
-    },
+    onSend: (email) => resetSendCode(normalizeId(userId), email),
+    onVerify: resetVerifyCode,
   });
 
   const handleUserIdChange = (value: string) => {
@@ -34,11 +30,15 @@ export function FindPasswordView({ onBack }: { onBack: () => void }) {
     setIsReset(false);
   };
 
-  const resetPassword = () => {
-    if (!verification.isVerified) {
-      verification.setError("이메일 인증을 먼저 완료해 주세요.");
+  const requestAuth = () => {
+    if (!userId.trim()) {
+      verification.setError("아이디를 입력해 주세요.");
       return;
     }
+    void verification.requestAuth();
+  };
+
+  const resetPassword = async () => {
     if (newPassword.length < 8) {
       verification.setError("새 비밀번호는 8자 이상이어야 합니다.");
       return;
@@ -47,18 +47,13 @@ export function FindPasswordView({ onBack }: { onBack: () => void }) {
       verification.setError("새 비밀번호가 서로 일치하지 않습니다.");
       return;
     }
-    const user = matchedUser(verification.email);
-    if (!user) {
-      verification.setError("입력한 정보와 일치하는 계정이 없습니다.");
+
+    const result = await resetNewPassword(newPassword);
+    if (result.status !== "success") {
+      verification.setError(errorMessage(result));
       return;
     }
-    saveSavedUsers(
-      getSavedUsers().map((savedUser) =>
-        normalizeId(savedUser.id) === normalizeId(user.id)
-          ? { ...savedUser, password: newPassword }
-          : savedUser,
-      ),
-    );
+
     verification.setError("");
     setIsReset(true);
     setNewPassword("");
@@ -100,10 +95,11 @@ export function FindPasswordView({ onBack }: { onBack: () => void }) {
         </label>
         <button
           type="button"
-          onClick={verification.requestAuth}
-          className="h-16 w-full rounded-2xl bg-blue-600 text-xl font-black text-white"
+          onClick={requestAuth}
+          disabled={verification.isPending}
+          className="h-16 w-full rounded-2xl bg-blue-600 text-xl font-black text-white disabled:bg-slate-300"
         >
-          인증메일 받기
+          {verification.isPending ? "처리 중…" : "인증메일 받기"}
         </button>
         {verification.isAuthRequested && !verification.isVerified && (
           <div>
@@ -122,8 +118,9 @@ export function FindPasswordView({ onBack }: { onBack: () => void }) {
               />
               <button
                 type="button"
-                onClick={verification.verify}
-                className="rounded-2xl bg-slate-900 px-6 text-lg font-black text-white"
+                onClick={() => void verification.verify()}
+                disabled={verification.isPending}
+                className="rounded-2xl bg-slate-900 px-6 text-lg font-black text-white disabled:bg-slate-300"
               >
                 확인
               </button>

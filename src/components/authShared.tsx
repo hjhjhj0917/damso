@@ -1,4 +1,6 @@
 import { useState } from 'react'
+import type { ApiResult, ApiUser } from '../utils/api'
+import { errorMessage } from '../utils/api'
 
 export type AccountType = 'user' | 'guardian' | 'admin'
 
@@ -38,25 +40,27 @@ export function normalizePhone(value: string) {
   return value.trim().replaceAll('-', '')
 }
 
-export const MASTER_ACCOUNT_ID = 'master'
-const MASTER_PASSWORD_DEFAULT = '1234'
-
-// 마스터(관리자) 로그인 여부를 판별합니다. 비밀번호는 localStorage의 'ansimMasterPassword'로 덮어쓸 수 있습니다.
-export function isMasterCredential(id: string, password: string) {
-  return (
-    normalizeId(id) === MASTER_ACCOUNT_ID &&
-    password === (localStorage.getItem('ansimMasterPassword') ?? MASTER_PASSWORD_DEFAULT)
-  )
-}
-
 export const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-
-// 시연용 목업 인증번호입니다. 실제 이메일 발송은 연동되어 있지 않습니다.
-export const DEMO_AUTH_CODE = '123456'
 
 export const AUTH_INPUT_CLASS =
   'h-16 w-full rounded-2xl border-2 border-slate-200 bg-slate-50 px-5 text-xl font-semibold outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:bg-white'
 
+/** 서버 ROLES 값을 화면이 쓰는 accountType으로 옮깁니다. */
+export function toAccountType(roles: ApiUser['roles']): AccountType {
+  if (roles === 'GUARDIAN') return 'guardian'
+  if (roles === 'ADMIN') return 'admin'
+  return 'user'
+}
+
+/*
+ * 아래 localStorage 헬퍼는 아직 서버로 옮기지 못한 두 가지에만 남아 있습니다.
+ *
+ *   - 보호자-어르신 연결 (USER_LINK 테이블과 API가 아직 없음)
+ *   - 관리자 화면의 전체 회원 목록 (목록 조회 엔드포인트가 아직 없음)
+ *
+ * 가입/로그인/찾기/마이페이지는 전부 utils/api.ts를 거칩니다. 위 두 기능이 서버로 옮겨가면
+ * 이 헬퍼와 SavedUser 타입도 함께 지워야 합니다.
+ */
 const USERS_STORAGE_KEY = 'ansimUsers'
 
 export function getSavedUsers(): SavedUser[] {
@@ -68,17 +72,47 @@ export function saveSavedUsers(users: SavedUser[]) {
   localStorage.setItem(USERS_STORAGE_KEY, JSON.stringify(users))
 }
 
-type EmailVerificationOptions = {
-  /** 인증 메일 발송 전 추가 검증. 에러 메시지를 반환하면 발송을 막습니다. */
-  onBeforeSend?: (email: string) => string | null
+/**
+ * 보호자가 연결한 피보호인 정보. 회원 정보가 서버로 옮겨가면서 SavedUser에 얹어 두던
+ * parent 필드가 갈 곳을 잃어, 회원 ID를 키로 따로 보관합니다. USER_LINK API가 생기면
+ * 이 두 함수와 저장 키를 함께 지웁니다.
+ */
+const PARENT_LINK_STORAGE_KEY = 'ansimParentLinks'
+
+type ParentLinkMap = Record<string, ParentProfile>
+
+export function getParentLink(userId: string): ParentProfile | undefined {
+  const stored = localStorage.getItem(PARENT_LINK_STORAGE_KEY)
+  if (!stored) return undefined
+  return (JSON.parse(stored) as ParentLinkMap)[userId]
 }
 
-/** 이메일 인증번호 발송 → 확인 흐름을 다루는 공용 훅. 아이디/비밀번호 찾기, 회원가입에서 재사용합니다. */
-export function useEmailVerification({ onBeforeSend }: EmailVerificationOptions = {}) {
+export function saveParentLink(userId: string, parent: ParentProfile) {
+  const stored = localStorage.getItem(PARENT_LINK_STORAGE_KEY)
+  const map = stored ? (JSON.parse(stored) as ParentLinkMap) : {}
+  map[userId] = parent
+  localStorage.setItem(PARENT_LINK_STORAGE_KEY, JSON.stringify(map))
+}
+
+type EmailVerificationOptions = {
+  /** 인증번호 발송 요청. 서버 응답을 그대로 돌려주면 됩니다. */
+  onSend: (email: string) => Promise<ApiResult<unknown>>
+  /** 인증번호 확인 요청. */
+  onVerify: (code: string) => Promise<ApiResult<unknown>>
+}
+
+/**
+ * 인증번호 발송 → 확인 흐름을 다루는 공용 훅. 아이디 찾기와 비밀번호 재설정이 함께 씁니다.
+ *
+ * 두 화면이 부르는 엔드포인트가 서로 다르기 때문에 호출 자체는 바깥에서 주입받고, 여기서는
+ * 입력값·발송 여부·확인 여부·에러 문구만 관리합니다.
+ */
+export function useEmailVerification({ onSend, onVerify }: EmailVerificationOptions) {
   const [email, setEmailValue] = useState('')
   const [authCode, setAuthCode] = useState('')
   const [isAuthRequested, setIsAuthRequested] = useState(false)
   const [isVerified, setIsVerified] = useState(false)
+  const [isPending, setIsPending] = useState(false)
   const [error, setError] = useState('')
 
   const resetVerification = () => {
@@ -93,7 +127,7 @@ export function useEmailVerification({ onBeforeSend }: EmailVerificationOptions 
     resetVerification()
   }
 
-  const requestAuth = () => {
+  const requestAuth = async () => {
     setError('')
     setIsVerified(false)
     const trimmedEmail = email.trim()
@@ -101,25 +135,34 @@ export function useEmailVerification({ onBeforeSend }: EmailVerificationOptions 
       setError('올바른 이메일 주소를 입력해 주세요.')
       return false
     }
-    const validationError = onBeforeSend?.(trimmedEmail)
-    if (validationError) {
-      setError(validationError)
+
+    setIsPending(true)
+    const result = await onSend(trimmedEmail)
+    setIsPending(false)
+
+    if (result.status !== 'success') {
+      setError(errorMessage(result))
       return false
     }
+
     setAuthCode('')
     setIsAuthRequested(true)
-    alert(`인증 이메일이 발송되었습니다. 시연용 인증번호는 ${DEMO_AUTH_CODE}입니다.`)
     return true
   }
 
-  const verify = () => {
-    if (authCode !== DEMO_AUTH_CODE) {
-      setError('인증번호가 맞지 않습니다.')
-      return false
+  const verify = async () => {
+    setIsPending(true)
+    const result = await onVerify(authCode)
+    setIsPending(false)
+
+    if (result.status !== 'success') {
+      setError(errorMessage(result))
+      return null
     }
+
     setError('')
     setIsVerified(true)
-    return true
+    return result
   }
 
   return {
@@ -129,6 +172,7 @@ export function useEmailVerification({ onBeforeSend }: EmailVerificationOptions 
     setAuthCode,
     isAuthRequested,
     isVerified,
+    isPending,
     error,
     setError,
     requestAuth,
