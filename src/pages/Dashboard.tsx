@@ -2,13 +2,22 @@ import { type ReactNode, useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import {
   getSavedUsers,
-  normalizeId,
   normalizePhone,
+  saveParentLink,
   saveSavedUsers,
+  toAccountType,
   type AccountType,
   type ParentProfile,
   type SavedUser,
 } from "../components/authShared";
+import {
+  changePassword as changePasswordRequest,
+  errorMessage,
+  fetchSession,
+  logout as logoutRequest,
+  updateProfile,
+  withdraw as withdrawRequest,
+} from "../utils/api";
 import AdminView from "./AdminView";
 import { PrivacyView } from "./Support";
 import {
@@ -284,9 +293,59 @@ function Dashboard() {
     return () => window.clearInterval(interval);
   }, [schedules, notificationsEnabled]);
 
+  /**
+   * 진짜 로그인 여부는 서버 세션이 정합니다. localStorage의 ansimSession은 화면을 즉시
+   * 그리기 위한 사본일 뿐이라, 세션이 만료됐거나 다른 탭에서 로그아웃했으면 여기서 걸러
+   * 첫 화면으로 돌려보냅니다. 살아 있으면 서버 값으로 사본을 갱신합니다.
+   */
+  useEffect(() => {
+    let cancelled = false;
+
+    void fetchSession().then((result) => {
+      if (cancelled) return;
+
+      if (result.status !== "success" || !result.data) {
+        localStorage.removeItem("ansimSession");
+        localStorage.removeItem("ansimAutoLogin");
+        navigate("/", { replace: true });
+        return;
+      }
+
+      const user = result.data;
+      setSession((current) => ({
+        ...current,
+        id: user.id,
+        name: user.name,
+        phone: user.phone ?? "",
+        accountType: toAccountType(user.roles),
+      }));
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [navigate]);
+
   const go = (tab: ServiceTab) => navigate(`/dashboard/${tab}`);
 
-  const saveProfile = (next: Session) => {
+  /**
+   * 서버에 저장하고, 성공했을 때만 화면 상태를 바꿉니다. 순서를 뒤집으면 저장에 실패해도
+   * 화면에는 바뀐 값이 남아 다음 새로고침에 조용히 되돌아갑니다.
+   *
+   * 피보호인 연결 정보(parentName 등)는 아직 서버에 없어서 세션 캐시에만 반영합니다.
+   */
+  const saveProfile = async (next: Session) => {
+    const changedProfile =
+      next.name !== session.name || next.phone !== session.phone;
+
+    if (changedProfile) {
+      const result = await updateProfile({ name: next.name, phone: next.phone });
+      if (result.status !== "success") {
+        setToast({ message: errorMessage(result) });
+        return;
+      }
+    }
+
     setSession(next);
     localStorage.setItem("ansimSession", JSON.stringify(next));
     setToast({ message: "내 정보가 안전하게 저장되었어요.", tone: "green" });
@@ -3079,38 +3138,50 @@ function MyPage({
   const [form, setForm] = useState(session);
   const [edit, setEdit] = useState(false);
   const [withdraw, setWithdraw] = useState(false);
+  const [withdrawPassword, setWithdrawPassword] = useState("");
+  const [withdrawError, setWithdrawError] = useState("");
   const [linkParentOpen, setLinkParentOpen] = useState(false);
   const [passwordResetOpen, setPasswordResetOpen] = useState(false);
   const [guardianManageOpen, setGuardianManageOpen] = useState(false);
   const [privacyOpen, setPrivacyOpen] = useState(false);
   const maskedPhone = `${session.phone.slice(0, 3)}-${session.phone.slice(3, 7)}-${session.phone.slice(7)}`;
-  const logout = () => {
+  const clearLocalSession = () => {
     localStorage.removeItem("ansimSession");
     localStorage.removeItem("ansimAutoLogin");
+  };
+
+  const logout = async () => {
+    // 서버 세션을 먼저 끊습니다. 브라우저 쪽만 지우면 쿠키가 살아 있어 그대로 다시 들어옵니다.
+    await logoutRequest();
+    clearLocalSession();
     navigate("/");
   };
-  const removeAccount = () => {
-    saveSavedUsers(getSavedUsers().filter((u) => u.id !== session.id));
-    localStorage.removeItem("ansimSession");
-    localStorage.removeItem("ansimAutoLogin");
+
+  /** 탈퇴는 되돌릴 수 없으므로 서버가 현재 비밀번호를 다시 확인합니다. */
+  const removeAccount = async () => {
+    if (withdrawPassword.length === 0) {
+      setWithdrawError("비밀번호를 입력해 주세요.");
+      return;
+    }
+
+    const result = await withdrawRequest(withdrawPassword);
+    if (result.status !== "success") {
+      setWithdrawError(errorMessage(result));
+      return;
+    }
+
+    clearLocalSession();
     navigate("/");
   };
+
   const completeParentLink = (parent: ParentLink) => {
-    saveSavedUsers(
-      getSavedUsers().map((user) =>
-        user.id === session.id
-          ? {
-              ...user,
-              parent: {
-                ...parent,
-                address: "",
-                consentAt: new Date().toISOString(),
-              },
-            }
-          : user,
-      ),
-    );
-    saveProfile({
+    // USER_LINK API가 없어 아직 브라우저에 남습니다. 서버로 옮기면 이 호출이 API로 바뀝니다.
+    saveParentLink(session.id, {
+      ...parent,
+      address: "",
+      consentAt: new Date().toISOString(),
+    });
+    void saveProfile({
       ...session,
       parentName: parent.name,
       parentPhone: parent.phone,
@@ -3372,21 +3443,51 @@ function MyPage({
         </div>
       </section>
       {withdraw && (
-        <Modal onClose={() => setWithdraw(false)}>
+        <Modal
+          onClose={() => {
+            setWithdraw(false);
+            setWithdrawPassword("");
+            setWithdrawError("");
+          }}
+        >
           <h2 className="text-2xl font-black">정말 탈퇴하시겠어요?</h2>
           <p className="mt-3 leading-7 text-slate-500">
             탈퇴하면 저장된 대화, 데일리노트, 자서전과 건강 기록을 다시 복구할
             수 없습니다.
           </p>
+          <label className="mt-6 block">
+            <span className="mb-2 block text-sm font-black">
+              확인을 위해 비밀번호를 입력해 주세요
+            </span>
+            <input
+              value={withdrawPassword}
+              onChange={(event) => {
+                setWithdrawPassword(event.target.value);
+                setWithdrawError("");
+              }}
+              type="password"
+              placeholder="비밀번호"
+              className="h-12 w-full rounded-xl border-2 border-slate-200 bg-slate-50 px-4 font-semibold outline-none focus:border-blue-500 focus:bg-white"
+            />
+          </label>
+          {withdrawError && (
+            <p className="mt-3 rounded-xl bg-red-50 px-4 py-3 text-sm font-bold text-red-600">
+              {withdrawError}
+            </p>
+          )}
           <div className="mt-6 flex gap-3">
             <button
-              onClick={() => setWithdraw(false)}
+              onClick={() => {
+                setWithdraw(false);
+                setWithdrawPassword("");
+                setWithdrawError("");
+              }}
               className="flex-1 rounded-xl bg-slate-100 py-3 font-black"
             >
               계속 이용하기
             </button>
             <button
-              onClick={removeAccount}
+              onClick={() => void removeAccount()}
               className="flex-1 rounded-xl bg-red-500 py-3 font-black text-white"
             >
               탈퇴하기
@@ -3395,10 +3496,7 @@ function MyPage({
         </Modal>
       )}
       {passwordResetOpen && (
-        <MyPagePasswordReset
-          session={session}
-          onClose={() => setPasswordResetOpen(false)}
-        />
+        <MyPagePasswordReset onClose={() => setPasswordResetOpen(false)} />
       )}
       {linkParentOpen && (
         <ParentLinkModal
@@ -3642,39 +3740,21 @@ function SettingRow({
   );
 }
 
-function MyPagePasswordReset({
-  session,
-  onClose,
-}: {
-  session: Session;
-  onClose: () => void;
-}) {
+function MyPagePasswordReset({ onClose }: { onClose: () => void }) {
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [passwordConfirm, setPasswordConfirm] = useState("");
   const [error, setError] = useState("");
   const [complete, setComplete] = useState(false);
 
-  const resetPassword = (event: React.FormEvent) => {
+  /**
+   * 현재 비밀번호 확인은 서버가 합니다. 여기서 하려면 저장된 비밀번호를 브라우저로 내려받아야
+   * 하는데, 서버는 되돌릴 수 없는 해시만 갖고 있고 그걸 내려보낼 이유도 없습니다.
+   */
+  const resetPassword = async (event: React.FormEvent) => {
     event.preventDefault();
     setError("");
-    const users = getSavedUsers();
-    const matchedUser = users.find(
-      (user) => normalizeId(user.id) === normalizeId(session.id),
-    );
-    const isDemo = session.id === "demo" || session.id === "guardian";
-    const demoPasswordKey =
-      session.id === "guardian"
-        ? "ansimGuardianDemoPassword"
-        : "ansimDemoPassword";
-    const savedPassword = isDemo
-      ? (localStorage.getItem(demoPasswordKey) ?? "1234")
-      : matchedUser?.password;
 
-    if (!savedPassword || savedPassword !== currentPassword) {
-      setError("현재 비밀번호가 맞지 않습니다.");
-      return;
-    }
     if (newPassword.length < 8) {
       setError("새 비밀번호는 8자 이상이어야 합니다.");
       return;
@@ -3688,17 +3768,16 @@ function MyPagePasswordReset({
       return;
     }
 
-    if (isDemo) {
-      localStorage.setItem(demoPasswordKey, newPassword);
-    } else {
-      saveSavedUsers(
-        users.map((user) =>
-          normalizeId(user.id) === normalizeId(session.id)
-            ? { ...user, password: newPassword }
-            : user,
-        ),
+    const result = await changePasswordRequest(currentPassword, newPassword);
+    if (result.status !== "success") {
+      setError(
+        result.code === "SIGNIN_NO_MATCHES"
+          ? "현재 비밀번호가 맞지 않습니다."
+          : errorMessage(result),
       );
+      return;
     }
+
     setCurrentPassword("");
     setNewPassword("");
     setPasswordConfirm("");

@@ -4,10 +4,11 @@ import { FindIdView } from "./FindIdView";
 import { FindPasswordView } from "./FindPasswordView";
 import {
   AUTH_INPUT_CLASS,
-  getSavedUsers,
-  isMasterCredential,
+  getParentLink,
   normalizeId,
+  toAccountType,
 } from "./authShared";
+import { errorMessage, login as loginRequest } from "../utils/api";
 
 type LoginModalMode = "login" | "findId" | "findPassword";
 
@@ -107,75 +108,49 @@ function LoginModal({ onClose }: { onClose: () => void }) {
   const [userId, setUserId] = useState("");
   const [password, setPassword] = useState("");
   const [autoLogin, setAutoLogin] = useState(false);
-  const [loginError, setLoginError] = useState(false);
+  const [isPending, setIsPending] = useState(false);
+  const [loginError, setLoginError] = useState("");
 
-  const handleLogin = (event: FormEvent<HTMLFormElement>) => {
+  const handleLogin = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    setLoginError("");
+    setIsPending(true);
 
-    const users = getSavedUsers();
+    const result = await loginRequest(normalizeId(userId), password);
 
-    const normalizedInputId = normalizeId(userId);
+    setIsPending(false);
 
-    const isMasterUser = isMasterCredential(userId, password);
-    const isDemoUser =
-      userId === "demo" &&
-      password === (localStorage.getItem("ansimDemoPassword") ?? "1234");
-    const isGuardianDemoUser =
-      userId === "guardian" &&
-      password ===
-        (localStorage.getItem("ansimGuardianDemoPassword") ?? "1234");
-
-    const isSignupUser = users.some((user) => {
-      return (
-        normalizeId(user.id) === normalizedInputId && user.password === password
-      );
-    });
-
-    if (isMasterUser || isDemoUser || isGuardianDemoUser || isSignupUser) {
-      const matchedUser = users.find(
-        (user) => normalizeId(user.id) === normalizedInputId,
-      );
-      const masterSession = {
-        id: "master",
-        name: "마스터 관리자",
-        phone: "",
-        accountType: "admin" as const,
-      };
-      const demoGuardianSession = {
-        id: "guardian",
-        name: "김민수",
-        phone: "01098765432",
-        accountType: "guardian" as const,
-        parentName: "김순자",
-        parentPhone: "01012345678",
-        parentRelation: "자녀",
-      };
-      const session = isMasterUser
-        ? masterSession
-        : isGuardianDemoUser
-          ? demoGuardianSession
-          : {
-              id: matchedUser?.id ?? "demo",
-              name: matchedUser?.name ?? "김순자",
-              phone: matchedUser?.phone ?? "01012345678",
-              accountType: matchedUser?.accountType ?? "user",
-              parentName: matchedUser?.parent?.name,
-              parentPhone: matchedUser?.parent?.phone,
-              parentRelation: matchedUser?.parent?.relation,
-            };
-      localStorage.setItem("ansimSession", JSON.stringify(session));
-      if (autoLogin) {
-        localStorage.setItem("ansimAutoLogin", "true");
-      } else {
-        localStorage.removeItem("ansimAutoLogin");
-      }
-      setLoginError(false);
-      onClose();
-      navigate("/dashboard");
+    if (result.status !== "success" || !result.data) {
+      setLoginError(errorMessage(result));
       return;
     }
 
-    setLoginError(true);
+    const user = result.data;
+    // 보호자-어르신 연결은 아직 서버에 없어서 브라우저에 남아 있습니다. USER_LINK API가
+    // 생기면 이 세 줄과 getParentLink가 함께 사라집니다.
+    const parent = getParentLink(user.id);
+
+    localStorage.setItem(
+      "ansimSession",
+      JSON.stringify({
+        id: user.id,
+        name: user.name,
+        phone: user.phone ?? "",
+        accountType: toAccountType(user.roles),
+        parentName: parent?.name,
+        parentPhone: parent?.phone,
+        parentRelation: parent?.relation,
+      }),
+    );
+
+    if (autoLogin) {
+      localStorage.setItem("ansimAutoLogin", "true");
+    } else {
+      localStorage.removeItem("ansimAutoLogin");
+    }
+
+    onClose();
+    navigate("/dashboard");
   };
 
   return (
@@ -200,16 +175,17 @@ function LoginModal({ onClose }: { onClose: () => void }) {
             password={password}
             autoLogin={autoLogin}
             loginError={loginError}
+            isPending={isPending}
             setUserId={setUserId}
             setPassword={setPassword}
             setAutoLogin={setAutoLogin}
             handleLogin={handleLogin}
             onFindId={() => {
-              setLoginError(false);
+              setLoginError("");
               setMode("findId");
             }}
             onFindPassword={() => {
-              setLoginError(false);
+              setLoginError("");
               setMode("findPassword");
             }}
             onClose={onClose}
@@ -231,6 +207,7 @@ function LoginView({
   password,
   autoLogin,
   loginError,
+  isPending,
   setUserId,
   setPassword,
   setAutoLogin,
@@ -242,7 +219,8 @@ function LoginView({
   userId: string;
   password: string;
   autoLogin: boolean;
-  loginError: boolean;
+  loginError: string;
+  isPending: boolean;
   setUserId: (value: string) => void;
   setPassword: (value: string) => void;
   setAutoLogin: (value: boolean) => void;
@@ -298,7 +276,7 @@ function LoginView({
 
             {loginError && (
               <p className="mt-3 rounded-2xl bg-red-50 px-4 py-3 text-lg font-bold text-red-600">
-                아이디 및 비밀번호가 맞지 않습니다.
+                {loginError}
               </p>
             )}
           </div>
@@ -319,9 +297,10 @@ function LoginView({
 
         <button
           type="submit"
-          className="mt-7 h-16 w-full rounded-2xl bg-blue-600 text-xl font-black text-white shadow-xl shadow-blue-200 hover:bg-blue-700"
+          disabled={isPending}
+          className="mt-7 h-16 w-full rounded-2xl bg-blue-600 text-xl font-black text-white shadow-xl shadow-blue-200 hover:bg-blue-700 disabled:bg-slate-300"
         >
-          로그인하기
+          {isPending ? "로그인 중…" : "로그인하기"}
         </button>
       </form>
 

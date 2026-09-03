@@ -2,16 +2,14 @@ import { type FormEvent, useEffect, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import {
   AUTH_INPUT_CLASS,
-  getSavedUsers,
+  EMAIL_PATTERN,
   normalizeId,
   normalizePhone,
-  saveSavedUsers,
-  useEmailVerification,
   type AccountType,
-  type SavedUser,
 } from '../components/authShared'
+import { checkIdExists, errorMessage, signup } from '../utils/api'
 
-type CheckStatus = 'idle' | 'available' | 'duplicate' | 'invalid'
+type CheckStatus = 'idle' | 'checking' | 'available' | 'duplicate' | 'invalid'
 
 const USER_ID_PATTERN = /^[a-zA-Z0-9_]{4,20}$/
 
@@ -23,15 +21,10 @@ function Signup() {
   const [passwordConfirm, setPasswordConfirm] = useState('')
   const [name, setName] = useState('')
   const [phone, setPhone] = useState('')
+  const [email, setEmail] = useState('')
   const [checkStatus, setCheckStatus] = useState<CheckStatus>('idle')
+  const [isSubmitting, setIsSubmitting] = useState(false)
   const [error, setError] = useState('')
-
-  const verification = useEmailVerification({
-    onBeforeSend: (email) =>
-      getSavedUsers().some((user) => user.email?.toLowerCase() === email.toLowerCase())
-        ? '이미 가입에 사용된 이메일입니다.'
-        : null,
-  })
 
   const hasGuardedHistoryRef = useRef(false)
 
@@ -56,20 +49,25 @@ function Signup() {
     return () => window.removeEventListener('popstate', handlePopState)
   }, [])
 
-  const handleDuplicateCheck = () => {
+  const handleDuplicateCheck = async () => {
     setError('')
     const normalizedUserId = normalizeId(userId)
     if (!USER_ID_PATTERN.test(normalizedUserId)) {
       setCheckStatus('invalid')
       return
     }
-    const isDuplicate = getSavedUsers().some(
-      (user) => normalizeId(user.id) === normalizedUserId,
-    )
-    setCheckStatus(isDuplicate ? 'duplicate' : 'available')
+
+    setCheckStatus('checking')
+    const result = await checkIdExists(normalizedUserId)
+    if (result.status !== 'success') {
+      setCheckStatus('idle')
+      setError(errorMessage(result))
+      return
+    }
+    setCheckStatus(result.data?.exists ? 'duplicate' : 'available')
   }
 
-  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     setError('')
 
@@ -94,21 +92,30 @@ function Signup() {
       setError('올바른 전화번호를 입력해 주세요.')
       return
     }
-    if (!verification.isVerified) {
-      setError('이메일 인증을 완료해 주세요.')
+    if (!EMAIL_PATTERN.test(email.trim())) {
+      setError('올바른 이메일 주소를 입력해 주세요.')
       return
     }
 
-    const newUser: SavedUser = {
+    setIsSubmitting(true)
+    const result = await signup({
       id: normalizeId(userId),
-      idType: 'username',
       password,
       name: name.trim(),
       phone: normalizedPhone,
-      email: verification.email.trim().toLowerCase(),
-      accountType,
+      email: email.trim().toLowerCase(),
+      roles: accountType === 'guardian' ? 'GUARDIAN' : 'USER',
+    })
+    setIsSubmitting(false)
+
+    if (result.status !== 'success') {
+      // 중복확인을 통과한 뒤 다른 사람이 먼저 그 아이디로 가입했을 수 있다. 그때는
+      // 확인 상태를 되돌려 다시 확인하게 한다.
+      if (result.code === 'DUPLICATE_ID') setCheckStatus('duplicate')
+      setError(errorMessage(result))
+      return
     }
-    saveSavedUsers([...getSavedUsers(), newUser])
+
     alert(`${accountType === 'guardian' ? '보호자' : '사용자'} 계정 회원가입이 완료되었습니다. 로그인 후 이용해 주세요.`)
     navigate('/?login=true')
   }
@@ -122,7 +129,7 @@ function Signup() {
             <h1 className="mt-8 text-5xl font-black leading-tight text-slate-950">
               필요한 정보만 간단히,<br /><span className="text-blue-600">담소를 시작해 보세요.</span>
             </h1>
-            <p className="mt-7 text-xl leading-9 text-slate-700">복잡한 휴대폰 본인인증 없이 이메일 인증 한 번으로 가입할 수 있어요.</p>
+            <p className="mt-7 text-xl leading-9 text-slate-700">복잡한 휴대폰 본인인증 없이 기본 정보만으로 가입할 수 있어요.</p>
             <div className="mt-10 grid grid-cols-2 gap-5">
               <InfoCard icon="🌼" title="음성·문자 대화" />
               <InfoCard icon="📘" title="데일리노트" />
@@ -136,7 +143,7 @@ function Signup() {
           <div className="mb-8 text-center">
             <img src="/logo.svg" alt="담소" className="mx-auto h-16 w-16 rounded-3xl shadow-lg" />
             <h2 className="mt-5 text-4xl font-black text-slate-950">회원가입</h2>
-            <p className="mt-3 text-lg text-slate-600">기본 정보와 이메일 인증만 완료해 주세요.</p>
+            <p className="mt-3 text-lg text-slate-600">기본 정보만 입력하면 가입이 완료됩니다.</p>
           </div>
 
           <div className="space-y-6">
@@ -173,7 +180,7 @@ function Signup() {
               <label className="mb-2 block text-lg font-extrabold text-slate-800">아이디</label>
               <div className="relative">
                 <input value={userId} onChange={(event) => { setUserId(event.target.value); setCheckStatus('idle'); setError('') }} placeholder="영문, 숫자, 밑줄 4~20자" className={`${AUTH_INPUT_CLASS} pr-32`} />
-                <button type="button" onClick={handleDuplicateCheck} className="absolute right-2 top-1/2 h-12 -translate-y-1/2 rounded-xl bg-blue-600 px-5 font-black text-white">중복확인</button>
+                <button type="button" onClick={handleDuplicateCheck} disabled={checkStatus === 'checking'} className="absolute right-2 top-1/2 h-12 -translate-y-1/2 rounded-xl bg-blue-600 px-5 font-black text-white disabled:bg-slate-300">{checkStatus === 'checking' ? '확인 중' : '중복확인'}</button>
               </div>
               {checkStatus === 'invalid' && <Message error>영문, 숫자, 밑줄로 4~20자 입력해 주세요.</Message>}
               {checkStatus === 'duplicate' && <Message error>이미 사용 중인 아이디입니다.</Message>}
@@ -188,28 +195,14 @@ function Signup() {
             <Field label="이름"><input value={name} onChange={(event) => { setName(event.target.value); setError('') }} placeholder="이름을 입력하세요" className={AUTH_INPUT_CLASS} /></Field>
             <Field label="전화번호"><input value={phone} onChange={(event) => { setPhone(event.target.value.replace(/\D/g, '').slice(0, 11)); setError('') }} type="tel" inputMode="numeric" placeholder="01012345678" className={AUTH_INPUT_CLASS} /></Field>
 
-            <div>
-              <label className="mb-2 block text-lg font-extrabold text-slate-800">이메일</label>
-              <div className="flex gap-3">
-                <input value={verification.email} onChange={(event) => verification.setEmail(event.target.value)} type="email" placeholder="example@email.com" className={`${AUTH_INPUT_CLASS} min-w-0 flex-1`} />
-                <button type="button" onClick={verification.requestAuth} className="shrink-0 rounded-2xl bg-blue-600 px-4 font-black text-white">인증메일 받기</button>
-              </div>
-            </div>
-
-            {verification.isAuthRequested && !verification.isVerified && (
-              <div>
-                <label className="mb-2 block text-lg font-extrabold text-slate-800">이메일 인증번호</label>
-                <div className="flex gap-3">
-                  <input value={verification.authCode} onChange={(event) => verification.setAuthCode(event.target.value.replace(/\D/g, '').slice(0, 6))} inputMode="numeric" placeholder="123456" className={`${AUTH_INPUT_CLASS} min-w-0 flex-1`} />
-                  <button type="button" onClick={verification.verify} className="rounded-2xl bg-slate-900 px-6 font-black text-white">확인</button>
-                </div>
-              </div>
-            )}
-            {verification.isVerified && <p className="rounded-2xl bg-emerald-50 px-5 py-4 font-bold text-emerald-700">✓ 이메일 인증이 완료되었습니다.</p>}
+            <Field label="이메일">
+              <input value={email} onChange={(event) => { setEmail(event.target.value); setError('') }} type="email" placeholder="example@email.com" className={AUTH_INPUT_CLASS} />
+              <Message>아이디와 비밀번호를 잊었을 때 본인 확인에 사용됩니다.</Message>
+            </Field>
           </div>
 
-          {(error || verification.error) && <p className="mt-6 rounded-2xl bg-red-50 px-5 py-4 text-lg font-bold text-red-600">{error || verification.error}</p>}
-          <button type="submit" className="mt-8 h-16 w-full rounded-2xl bg-blue-600 text-xl font-black text-white shadow-xl shadow-blue-200 hover:bg-blue-700">회원가입 완료</button>
+          {error && <p className="mt-6 rounded-2xl bg-red-50 px-5 py-4 text-lg font-bold text-red-600">{error}</p>}
+          <button type="submit" disabled={isSubmitting} className="mt-8 h-16 w-full rounded-2xl bg-blue-600 text-xl font-black text-white shadow-xl shadow-blue-200 hover:bg-blue-700 disabled:bg-slate-300">{isSubmitting ? '가입 중…' : '회원가입 완료'}</button>
           <Link to="/" className="mt-4 inline-flex h-14 w-full items-center justify-center rounded-2xl bg-slate-100 text-lg font-black text-slate-700">메인으로 돌아가기</Link>
         </form>
       </section>
