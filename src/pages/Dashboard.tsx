@@ -508,7 +508,7 @@ function Dashboard() {
         </div>
       </aside>
 
-      <main className="pb-28 lg:ml-64 lg:pb-10">
+      <main className="pb-28 lg:ml-64 lg:pb-0">
         {activeTab === "home" &&
           (isGuardian ? (
             hasLinkedParent ? (
@@ -738,7 +738,7 @@ function Announcements() {
   }, []);
 
   return (
-    <section className="mx-auto max-w-[1400px] px-5 pt-5 sm:px-8 sm:pt-8 lg:px-10 lg:pt-10">
+    <section className="mx-auto max-w-[1400px] px-5 pt-5 sm:px-8 sm:pt-8 lg:px-10 lg:pb-10">
       <div className="overflow-hidden rounded-[1.5rem] border border-slate-200 bg-white shadow-sm">
         <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4 sm:px-6">
           <div>

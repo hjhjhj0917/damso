@@ -136,9 +136,10 @@ function Signup() {
   }
 
   return (
-    <main className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-sky-50 px-5 py-12">
-      <section className="mx-auto grid max-w-6xl items-center gap-10 lg:grid-cols-[1fr_520px]">
-        <div className="hidden lg:block">
+    <main className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-sky-50 px-5 py-12 lg:h-screen lg:min-h-0 lg:overflow-hidden lg:py-0">
+      <section className="mx-auto grid max-w-6xl items-center gap-10 lg:h-full lg:grid-cols-[1fr_520px] lg:grid-rows-1">
+        {/* 왼쪽 소개 영역은 화면 중앙에 고정하고, 스크롤은 오른쪽 입력 영역에서만 일어나게 합니다. */}
+        <div className="hidden min-h-0 lg:block">
           <div className="rounded-[3rem] bg-white/80 p-10 shadow-xl">
             <div className="inline-flex rounded-full bg-blue-100 px-5 py-3 text-lg font-black text-blue-700">간편 회원가입</div>
             <h1 className="mt-8 text-5xl font-black leading-tight text-slate-950">
@@ -154,96 +155,98 @@ function Signup() {
           </div>
         </div>
 
-        <form onSubmit={handleSubmit} className="rounded-[2rem] bg-white p-7 shadow-2xl sm:p-9">
-          <div className="mb-8 text-center">
-            <img src="/logo.svg" alt="담소" className="mx-auto h-16 w-16 rounded-3xl shadow-lg" />
-            <h2 className="mt-5 text-4xl font-black text-slate-950">회원가입</h2>
-            <p className="mt-3 text-lg text-slate-600">기본 정보만 입력하면 가입이 완료됩니다.</p>
-          </div>
-
-          <div className="space-y-6">
-            <div>
-              <label className="mb-3 block text-lg font-extrabold text-slate-800">가입할 계정 유형</label>
-              <div className="grid grid-cols-2 gap-3">
-                <button
-                  type="button"
-                  onClick={() => { setAccountType('user'); setError('') }}
-                  className={`rounded-2xl border-2 p-4 text-left transition ${accountType === 'user' ? 'border-blue-600 bg-blue-50 text-blue-700' : 'border-slate-200 bg-white text-slate-600'}`}
-                >
-                  <span className="text-2xl">👵🏻</span>
-                  <b className="mt-2 block text-lg">사용자 계정</b>
-                  <span className="mt-1 block text-xs leading-5">담소 서비스를 직접 이용해요</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => { setAccountType('guardian'); setError('') }}
-                  className={`rounded-2xl border-2 p-4 text-left transition ${accountType === 'guardian' ? 'border-blue-600 bg-blue-50 text-blue-700' : 'border-slate-200 bg-white text-slate-600'}`}
-                >
-                  <span className="text-2xl">👨‍👩‍👧</span>
-                  <b className="mt-2 block text-lg">보호자 계정</b>
-                  <span className="mt-1 block text-xs leading-5">가족의 기록과 건강을 살펴봐요</span>
-                </button>
-              </div>
-              {accountType === 'guardian' && (
-                <p className="mt-3 rounded-2xl bg-blue-50 px-4 py-3 text-sm font-bold leading-6 text-blue-700">
-                  가입 후 마이페이지에서 피보호인 계정을 연결할 수 있습니다.
-                </p>
-              )}
+        <div className="lg:min-h-0 lg:self-stretch lg:overflow-y-auto lg:py-12">
+          <form onSubmit={handleSubmit} className="rounded-[2rem] bg-white p-7 shadow-2xl sm:p-9">
+            <div className="mb-8 text-center">
+              <img src="/logo.svg" alt="담소" className="mx-auto h-16 w-16 rounded-3xl shadow-lg" />
+              <h2 className="mt-5 text-4xl font-black text-slate-950">회원가입</h2>
+              <p className="mt-3 text-lg text-slate-600">기본 정보만 입력하면 가입이 완료됩니다.</p>
             </div>
 
-            <div>
-              <label className="mb-2 block text-lg font-extrabold text-slate-800">아이디</label>
-              <div className="relative">
-                <input value={userId} onChange={(event) => { setUserId(event.target.value); setCheckStatus('idle'); setError('') }} placeholder="영문, 숫자, 밑줄 4~20자" className={`${AUTH_INPUT_CLASS} pr-32`} />
-                <button type="button" onClick={handleDuplicateCheck} disabled={checkStatus === 'checking'} className="absolute right-2 top-1/2 h-12 -translate-y-1/2 rounded-xl bg-blue-600 px-5 font-black text-white disabled:bg-slate-300">{checkStatus === 'checking' ? '확인 중' : '중복확인'}</button>
-              </div>
-              {checkStatus === 'invalid' && <Message error>영문, 숫자, 밑줄로 4~20자 입력해 주세요.</Message>}
-              {checkStatus === 'duplicate' && <Message error>이미 사용 중인 아이디입니다.</Message>}
-              {checkStatus === 'available' && <Message>사용 가능한 아이디입니다.</Message>}
-            </div>
-
-            <Field label="비밀번호"><input value={password} onChange={(event) => { setPassword(event.target.value); setError('') }} type="password" placeholder="8자 이상 입력하세요" className={AUTH_INPUT_CLASS} /></Field>
-            <Field label="비밀번호 확인">
-              <input value={passwordConfirm} onChange={(event) => { setPasswordConfirm(event.target.value); setError('') }} type="password" placeholder="비밀번호를 다시 입력하세요" className={AUTH_INPUT_CLASS} />
-              {passwordConfirm.length > 0 && password !== passwordConfirm && <Message error>비밀번호가 일치하지 않습니다.</Message>}
-            </Field>
-            <Field label="이름"><input value={name} onChange={(event) => { setName(event.target.value); setError('') }} placeholder="이름을 입력하세요" className={AUTH_INPUT_CLASS} /></Field>
-            <div>
-              <label className="mb-2 block text-lg font-extrabold text-slate-800">주민등록번호</label>
-              <div className="flex items-center gap-2">
-                <input
-                  value={residentFront}
-                  onChange={(event) => { setResidentFront(event.target.value.replace(/\D/g, '').slice(0, 6)); setError('') }}
-                  inputMode="numeric"
-                  placeholder="앞 6자리"
-                  className={`${AUTH_INPUT_CLASS} min-w-0 flex-1`}
-                />
-                <span className="font-black text-slate-400">-</span>
-                <div className={`${AUTH_INPUT_CLASS} flex min-w-0 flex-1 items-center`}>
-                  <input
-                    value={residentBackFirst}
-                    onChange={(event) => { setResidentBackFirst(event.target.value.replace(/\D/g, '').slice(0, 1)); setError('') }}
-                    inputMode="numeric"
-                    placeholder="1"
-                    className="w-6 bg-transparent font-semibold outline-none"
-                  />
-                  <span className="ml-1 font-black tracking-[0.12em] text-slate-400">******</span>
+            <div className="space-y-6">
+              <div>
+                <label className="mb-3 block text-lg font-extrabold text-slate-800">가입할 계정 유형</label>
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    type="button"
+                    onClick={() => { setAccountType('user'); setError('') }}
+                    className={`rounded-2xl border-2 p-4 text-left transition ${accountType === 'user' ? 'border-blue-600 bg-blue-50 text-blue-700' : 'border-slate-200 bg-white text-slate-600'}`}
+                  >
+                    <span className="text-2xl">👵🏻</span>
+                    <b className="mt-2 block text-lg">사용자 계정</b>
+                    <span className="mt-1 block text-xs leading-5">담소 서비스를 직접 이용해요</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setAccountType('guardian'); setError('') }}
+                    className={`rounded-2xl border-2 p-4 text-left transition ${accountType === 'guardian' ? 'border-blue-600 bg-blue-50 text-blue-700' : 'border-slate-200 bg-white text-slate-600'}`}
+                  >
+                    <span className="text-2xl">👨‍👩‍👧</span>
+                    <b className="mt-2 block text-lg">보호자 계정</b>
+                    <span className="mt-1 block text-xs leading-5">가족의 기록과 건강을 살펴봐요</span>
+                  </button>
                 </div>
+                {accountType === 'guardian' && (
+                  <p className="mt-3 rounded-2xl bg-blue-50 px-4 py-3 text-sm font-bold leading-6 text-blue-700">
+                    가입 후 마이페이지에서 피보호인 계정을 연결할 수 있습니다.
+                  </p>
+                )}
               </div>
-              <Message>보호자 계정을 연결할 때 본인 확인에 사용되며, 주민등록번호는 저장되지 않고 생년월일만 남습니다.</Message>
+
+              <div>
+                <label className="mb-2 block text-lg font-extrabold text-slate-800">아이디</label>
+                <div className="relative">
+                  <input value={userId} onChange={(event) => { setUserId(event.target.value); setCheckStatus('idle'); setError('') }} placeholder="영문, 숫자, 밑줄 4~20자" className={`${AUTH_INPUT_CLASS} pr-32`} />
+                  <button type="button" onClick={handleDuplicateCheck} disabled={checkStatus === 'checking'} className="absolute right-2 top-1/2 h-12 -translate-y-1/2 rounded-xl bg-blue-600 px-5 font-black text-white disabled:bg-slate-300">{checkStatus === 'checking' ? '확인 중' : '중복확인'}</button>
+                </div>
+                {checkStatus === 'invalid' && <Message error>영문, 숫자, 밑줄로 4~20자 입력해 주세요.</Message>}
+                {checkStatus === 'duplicate' && <Message error>이미 사용 중인 아이디입니다.</Message>}
+                {checkStatus === 'available' && <Message>사용 가능한 아이디입니다.</Message>}
+              </div>
+
+              <Field label="비밀번호"><input value={password} onChange={(event) => { setPassword(event.target.value); setError('') }} type="password" placeholder="8자 이상 입력하세요" className={AUTH_INPUT_CLASS} /></Field>
+              <Field label="비밀번호 확인">
+                <input value={passwordConfirm} onChange={(event) => { setPasswordConfirm(event.target.value); setError('') }} type="password" placeholder="비밀번호를 다시 입력하세요" className={AUTH_INPUT_CLASS} />
+                {passwordConfirm.length > 0 && password !== passwordConfirm && <Message error>비밀번호가 일치하지 않습니다.</Message>}
+              </Field>
+              <Field label="이름"><input value={name} onChange={(event) => { setName(event.target.value); setError('') }} placeholder="이름을 입력하세요" className={AUTH_INPUT_CLASS} /></Field>
+              <div>
+                <label className="mb-2 block text-lg font-extrabold text-slate-800">주민등록번호</label>
+                <div className="flex items-center gap-2">
+                  <input
+                    value={residentFront}
+                    onChange={(event) => { setResidentFront(event.target.value.replace(/\D/g, '').slice(0, 6)); setError('') }}
+                    inputMode="numeric"
+                    placeholder="앞 6자리"
+                    className={`${AUTH_INPUT_CLASS} min-w-0 flex-1`}
+                  />
+                  <span className="font-black text-slate-400">-</span>
+                  <div className={`${AUTH_INPUT_CLASS} flex min-w-0 flex-1 items-center`}>
+                    <input
+                      value={residentBackFirst}
+                      onChange={(event) => { setResidentBackFirst(event.target.value.replace(/\D/g, '').slice(0, 1)); setError('') }}
+                      inputMode="numeric"
+                      placeholder="1"
+                      className="w-6 bg-transparent font-semibold outline-none"
+                    />
+                    <span className="ml-1 font-black tracking-[0.12em] text-slate-400">******</span>
+                  </div>
+                </div>
+                <Message>보호자 계정을 연결할 때 본인 확인에 사용되며, 주민등록번호는 저장되지 않고 생년월일만 남습니다.</Message>
+              </div>
+              <Field label="전화번호"><input value={phone} onChange={(event) => { setPhone(event.target.value.replace(/\D/g, '').slice(0, 11)); setError('') }} type="tel" inputMode="numeric" placeholder="01012345678" className={AUTH_INPUT_CLASS} /></Field>
+
+              <Field label="이메일">
+                <input value={email} onChange={(event) => { setEmail(event.target.value); setError('') }} type="email" placeholder="example@email.com" className={AUTH_INPUT_CLASS} />
+                <Message>아이디와 비밀번호를 잊었을 때 본인 확인에 사용됩니다.</Message>
+              </Field>
             </div>
-            <Field label="전화번호"><input value={phone} onChange={(event) => { setPhone(event.target.value.replace(/\D/g, '').slice(0, 11)); setError('') }} type="tel" inputMode="numeric" placeholder="01012345678" className={AUTH_INPUT_CLASS} /></Field>
 
-            <Field label="이메일">
-              <input value={email} onChange={(event) => { setEmail(event.target.value); setError('') }} type="email" placeholder="example@email.com" className={AUTH_INPUT_CLASS} />
-              <Message>아이디와 비밀번호를 잊었을 때 본인 확인에 사용됩니다.</Message>
-            </Field>
-          </div>
-
-          {error && <p className="mt-6 rounded-2xl bg-red-50 px-5 py-4 text-lg font-bold text-red-600">{error}</p>}
-          <button type="submit" disabled={isSubmitting} className="mt-8 h-16 w-full rounded-2xl bg-blue-600 text-xl font-black text-white shadow-xl shadow-blue-200 hover:bg-blue-700 disabled:bg-slate-300">{isSubmitting ? '가입 중…' : '회원가입 완료'}</button>
-          <Link to="/" className="mt-4 inline-flex h-14 w-full items-center justify-center rounded-2xl bg-slate-100 text-lg font-black text-slate-700">메인으로 돌아가기</Link>
-        </form>
+            {error && <p className="mt-6 rounded-2xl bg-red-50 px-5 py-4 text-lg font-bold text-red-600">{error}</p>}
+            <button type="submit" disabled={isSubmitting} className="mt-8 h-16 w-full rounded-2xl bg-blue-600 text-xl font-black text-white shadow-xl shadow-blue-200 hover:bg-blue-700 disabled:bg-slate-300">{isSubmitting ? '가입 중…' : '회원가입 완료'}</button>
+            <Link to="/" className="mt-4 inline-flex h-14 w-full items-center justify-center rounded-2xl bg-slate-100 text-lg font-black text-slate-700">메인으로 돌아가기</Link>
+          </form>
+        </div>
       </section>
     </main>
   )
