@@ -57,6 +57,7 @@ import {
   daysSince,
   findDueSchedules,
   formatDate,
+  formatLongDate,
   formatMoment,
   formatTime,
   loadStored,
@@ -94,13 +95,14 @@ type Session = {
   createdAt?: number;
 };
 type Toast = { message: string; tone?: "blue" | "green" };
-type FamilyContact = {
-  id: number;
-  name: string;
-  relation: string;
-  phone: string;
-  emoji: string;
-};
+/**
+ * 알림을 받을 방법. 정하는 사람은 <b>받는 본인</b>입니다 — 마이페이지 설정에 있습니다.
+ *
+ * 예전에는 알림을 보내는 화면에서 골랐습니다. 그러면 어르신이 보호자의 연락 방법을 대신
+ * 정하는 셈이 됩니다. 카카오톡을 안 쓰는 보호자에게 알림톡을 고를 수도 있었습니다.
+ */
+type NotifyChannel = "카카오 알림톡" | "문자" | "메일";
+const notifyChannels: readonly NotifyChannel[] = ["카카오 알림톡", "문자", "메일"];
 type MyHospital = {
   id: number;
   name: string;
@@ -115,22 +117,6 @@ type AppNotification = {
   tab: ServiceTab;
   targetRole?: "user" | "guardian";
 };
-const familyContacts: FamilyContact[] = [
-  {
-    id: 1,
-    name: "김민수",
-    relation: "아들",
-    phone: "010-28**-10**",
-    emoji: "👨🏻",
-  },
-  {
-    id: 2,
-    name: "이정희",
-    relation: "딸",
-    phone: "010-73**-42**",
-    emoji: "👩🏻",
-  },
-];
 
 function Dashboard() {
   const location = useLocation();
@@ -176,6 +162,13 @@ function Dashboard() {
   const subjectName = linkedWard?.wardName || "피보호인";
   /** 보호자가 볼 때는 피보호인의 기록을, 어르신이 볼 때는 자기 기록을 부릅니다. */
   const subjectId = isGuardian ? linkedWard?.wardId : session.id;
+  /**
+   * 나와 연결된 보호자들. '가족에게 알림'이 받는 사람으로 씁니다.
+   *
+   * 어르신 계정에서만 채워집니다 — 보호자 계정의 links에는 피보호인이 담기고, 피보호인은
+   * 알림을 받을 가족이 아닙니다. 그래서 알림 버튼도 어르신에게만 보여 줍니다.
+   */
+  const guardianLinks = links.filter((link) => Boolean(link.guardianId));
   // 사용자 계정과, 그 사람을 돌보는 보호자 계정이 같은 피보호인의 병원 목록·건강 기록을
   // 공유하도록 피보호인 본인의 전화번호를 공용 키로 사용합니다.
   const careGroupKey = isGuardian
@@ -562,6 +555,7 @@ function Dashboard() {
             readOnly={isGuardian}
             currentUserId={session.id}
             onNotify={addNotification}
+            guardians={guardianLinks}
           />
         )}
         {activeTab === "calendar" && (
@@ -588,6 +582,7 @@ function Dashboard() {
             toast={setToast}
             subjectName={isGuardian ? subjectName : undefined}
             careGroupKey={careGroupKey}
+            guardians={guardianLinks}
           />
         )}
         {activeTab === "mypage" && (
@@ -1542,7 +1537,7 @@ function HomeView({
 }) {
   return (
     <Page
-      eyebrow="2026년 7월 2일 목요일"
+      eyebrow={formatLongDate()}
       title={`${name} 님, 오늘도 반가워요`}
       description="오늘의 이야기를 나누면 담소가 소중한 기록으로 남겨드려요."
     >
@@ -2212,6 +2207,7 @@ function NotesView({
   readOnly = false,
   currentUserId,
   onNotify,
+  guardians,
 }: {
   notes: ApiDiary[];
   setNotes: React.Dispatch<React.SetStateAction<ApiDiary[]>>;
@@ -2220,6 +2216,7 @@ function NotesView({
   readOnly?: boolean;
   currentUserId: string;
   onNotify: (message: string, tab?: ServiceTab) => void;
+  guardians: ApiLink[];
 }) {
   const [selected, setSelected] = useState<ApiDiary | null>(null);
   const [comments, setComments] = useState<ApiComment[]>([]);
@@ -2396,11 +2393,11 @@ function NotesView({
               <span>{healthNoteCount}</span>
             </button>
           </div>
-          <div className="mt-6 rounded-xl bg-amber-50 p-4">
-            <p className="text-xs font-black text-amber-700">이번 달 기록</p>
-            <p className="mt-1 text-2xl font-black">12일</p>
-            <p className="text-xs text-slate-500">꾸준히 기록 중이에요!</p>
-          </div>
+          {/*<div className="mt-6 rounded-xl bg-amber-50 p-4">*/}
+          {/*  <p className="text-xs font-black text-amber-700">이번 달 기록</p>*/}
+          {/*  <p className="mt-1 text-2xl font-black">12일</p>*/}
+          {/*  <p className="text-xs text-slate-500">꾸준히 기록 중이에요!</p>*/}
+          {/*</div>*/}
         </aside>
         <div className="space-y-4">
           {filtered.map((note) => (
@@ -2453,12 +2450,16 @@ function NotesView({
                   >
                     {canComment ? "읽기·코멘트" : "자세히 보기"}
                   </button>
-                  <button
-                    onClick={() => setShareNote(note)}
-                    className="rounded-xl bg-blue-50 px-4 py-2 text-sm font-black text-blue-700 hover:bg-blue-100"
-                  >
-                    가족 알림
-                  </button>
+                  {/* 보호자에게는 두지 않습니다. 보호자의 연결 목록에는 피보호인이 담기고,
+                      피보호인은 이 알림을 받을 가족이 아닙니다. */}
+                  {!readOnly && (
+                    <button
+                      onClick={() => setShareNote(note)}
+                      className="rounded-xl bg-blue-50 px-4 py-2 text-sm font-black text-blue-700 hover:bg-blue-100"
+                    >
+                      가족 알림
+                    </button>
+                  )}
                   {!readOnly && (
                     <button
                       onClick={() => void removeNote(note)}
@@ -2647,14 +2648,8 @@ function NotesView({
           type="데일리노트"
           title={shareNote.title}
           summary={[shareNote.mood, shareNote.health].filter(Boolean).join(" · ")}
+          guardians={guardians}
           onClose={() => setShareNote(null)}
-          onSent={(names) => {
-            setShareNote(null);
-            toast({
-              message: `${names}에게 데일리노트 알림을 보냈어요.`,
-              tone: "green",
-            });
-          }}
         />
       )}
     </Page>
@@ -2868,10 +2863,12 @@ function HealthView({
   toast,
   subjectName,
   careGroupKey,
+  guardians,
 }: {
   toast: (toast: Toast) => void;
   subjectName?: string;
   careGroupKey: string;
+  guardians: ApiLink[];
 }) {
   const [period, setPeriod] = useState("이번 주");
   const [sharing, setSharing] = useState(false);
@@ -2908,12 +2905,15 @@ function HealthView({
       }
       action={
         <div className="flex gap-2">
-          <button
-            onClick={() => setSharing(true)}
-            className="rounded-xl bg-blue-600 px-4 py-3 text-sm font-black text-white shadow-lg shadow-blue-200"
-          >
-            가족에게 알림
-          </button>
+          {/* 보호자에게는 두지 않습니다 — 보호자의 연결 목록에는 피보호인이 담깁니다. */}
+          {!subjectName && (
+            <button
+              onClick={() => setSharing(true)}
+              className="rounded-xl bg-blue-600 px-4 py-3 text-sm font-black text-white shadow-lg shadow-blue-200"
+            >
+              가족에게 알림
+            </button>
+          )}
           <select
             value={period}
             onChange={(e) => setPeriod(e.target.value)}
@@ -3152,14 +3152,8 @@ function HealthView({
           type="건강 리포트"
           title={`${period} 건강 리포트`}
           summary="안심 지수 86점 · 혈압과 수면 상태 안정 · 정기 검진 권장"
+          guardians={guardians}
           onClose={() => setSharing(false)}
-          onSent={(names) => {
-            setSharing(false);
-            toast({
-              message: `${names}에게 건강 리포트 알림을 보냈어요.`,
-              tone: "green",
-            });
-          }}
         />
       )}
       {callTarget && (
@@ -3584,6 +3578,22 @@ function MyPage({
     : "";
   const joinedDays = daysSince(session.createdAt);
 
+  /**
+   * 알림을 어떤 방법으로 받을지. 정하는 사람은 <b>받는 본인</b>입니다 — 예전에는 알림을
+   * 보내는 화면에서 골랐고, 그러면 어르신이 보호자의 연락 방법을 대신 정하는 셈이었습니다.
+   *
+   * 아직 서버에 올리지 않습니다. 알림 설정 엔드포인트가 없어서 이 브라우저에만 남습니다.
+   * 사람마다 다른 값이라 키에 아이디를 붙입니다(대화 음성 설정과 같은 방식입니다).
+   */
+  const notifyChannelKey = `damso.notifyChannel.${session.id}`;
+  const [notifyChannel, setNotifyChannel] = useState<NotifyChannel>(() =>
+    loadStored<NotifyChannel>(notifyChannelKey, "카카오 알림톡"),
+  );
+  useEffect(
+    () => localStorage.setItem(notifyChannelKey, JSON.stringify(notifyChannel)),
+    [notifyChannelKey, notifyChannel],
+  );
+
   const [roomCount, setRoomCount] = useState<number | null>(null);
   useEffect(() => {
     if (isGuardianAccount) return;
@@ -3905,6 +3915,15 @@ function MyPage({
                 onToggle={setNotificationsEnabled}
               />
               <SettingRow
+                title="알림 받을 방식"
+                text="알림톡·문자·메일 중 원하는 방법으로 받아요"
+                select={{
+                  value: notifyChannel,
+                  options: notifyChannels,
+                  onChange: (value) => setNotifyChannel(value as NotifyChannel),
+                }}
+              />
+              <SettingRow
                 title="비밀번호 재설정"
                 text="현재 비밀번호를 확인하고 새 비밀번호로 변경해요"
                 onClick={() => setPasswordResetOpen(true)}
@@ -4186,13 +4205,43 @@ function SettingRow({
   checked,
   onToggle,
   onClick,
+  select,
 }: {
   title: string;
   text: string;
   checked?: boolean;
   onToggle?: (next: boolean) => void;
   onClick?: () => void;
+  select?: {
+    value: string;
+    options: readonly string[];
+    onChange: (value: string) => void;
+  };
 }) {
+  // 고르는 줄은 <button>으로 감싸지 않습니다. <select>를 버튼 안에 두면 두 클릭이 서로
+  // 가로채여 목록이 열리지 않고, 버튼 안의 버튼은 애초에 올바른 HTML이 아닙니다.
+  if (select) {
+    return (
+      <div className="flex w-full items-center py-4 text-left">
+        <span>
+          <b className="block text-sm">{title}</b>
+          <span className="mt-1 block text-xs text-slate-400">{text}</span>
+        </span>
+        <select
+          value={select.value}
+          onChange={(event) => select.onChange(event.target.value)}
+          className="ml-auto shrink-0 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-black outline-none focus:border-blue-500"
+        >
+          {select.options.map((option) => (
+            <option key={option} value={option}>
+              {option}
+            </option>
+          ))}
+        </select>
+      </div>
+    );
+  }
+
   const isToggle = onToggle !== undefined;
   return (
     <button
@@ -4555,57 +4604,43 @@ function ParentLinkModal({
   );
 }
 
+/**
+ * 가족에게 알림 보내기.
+ *
+ * 받는 사람은 서버가 정합니다 — /api/link/list가 돌려주는, 나와 연결된 보호자들입니다.
+ * 예전에는 이 파일에 "김민수 / 아들 / 010-28**-10**" 같은 가짜 두 사람이 박혀 있어서
+ * 누가 로그인하든 그 둘이 보였고, 연결을 해 둔 실제 보호자는 보이지 않았습니다.
+ *
+ * <b>보내는 방법은 여기서 고르지 않습니다.</b> 그건 받는 보호자가 마이페이지의
+ * '알림 받을 방식'에서 스스로 정합니다. 알림을 받을 연락 수단을 보내는 사람이 대신
+ * 정하면, 카카오톡을 쓰지 않는 보호자에게 알림톡을 골라 보낼 수도 있습니다.
+ *
+ * 전송 버튼은 아직 눌리지 않습니다. 서버에 알림을 보내는 엔드포인트가 없기 때문입니다.
+ * 예전에는 localStorage에 한 줄 적고 "보냈어요"라고 알렸는데, 그러면 아무에게도 가지 않은
+ * 알림을 갔다고 믿게 됩니다.
+ */
 function FamilyShareModal({
   type,
   title,
   summary,
+  guardians,
   onClose,
-  onSent,
 }: {
   type: "데일리노트" | "건강 리포트";
   title: string;
   summary: string;
+  guardians: ApiLink[];
   onClose: () => void;
-  onSent: (names: string) => void;
 }) {
-  const [selectedIds, setSelectedIds] = useState<number[]>(
-    familyContacts.map((contact) => contact.id),
-  );
-  const [method, setMethod] = useState<"문자" | "카카오 알림톡">(
-    "카카오 알림톡",
+  const [selectedIds, setSelectedIds] = useState<string[]>(() =>
+    guardians.map((link) => link.guardianId ?? "").filter(Boolean),
   );
   const [includeSummary, setIncludeSummary] = useState(true);
 
-  const toggleContact = (id: number) => {
+  const toggleContact = (id: string) => {
     setSelectedIds((ids) =>
       ids.includes(id) ? ids.filter((value) => value !== id) : [...ids, id],
     );
-  };
-
-  const sendAlert = () => {
-    const recipients = familyContacts.filter((contact) =>
-      selectedIds.includes(contact.id),
-    );
-    const alerts = loadStored<Array<Record<string, unknown>>>(
-      "ansimFamilyAlerts",
-      [],
-    );
-    localStorage.setItem(
-      "ansimFamilyAlerts",
-      JSON.stringify([
-        {
-          id: Date.now(),
-          type,
-          title,
-          summary: includeSummary ? summary : undefined,
-          method,
-          recipients: recipients.map((contact) => contact.name),
-          sentAt: new Date().toISOString(),
-        },
-        ...alerts,
-      ]),
-    );
-    onSent(recipients.map((contact) => contact.name).join(", "));
   };
 
   return (
@@ -4615,87 +4650,105 @@ function FamilyShareModal({
       </span>
       <h2 className="mt-4 text-2xl font-black">가족에게 알림 보내기</h2>
       <p className="mt-2 text-sm leading-6 text-slate-500">
-        연결된 가족에게 {type} 소식을 안전하게 전달해요.
+        연결된 보호자에게 {type} 소식을 안전하게 전달해요.
       </p>
       <div className="mt-5 rounded-2xl border border-blue-100 bg-blue-50 p-4">
         <p className="text-xs font-black text-blue-600">{type}</p>
         <p className="mt-1 font-black text-slate-800">{title}</p>
-        {includeSummary && (
+        {includeSummary && summary && (
           <p className="mt-2 text-xs leading-5 text-slate-500">{summary}</p>
         )}
       </div>
-      <div className="mt-6">
-        <p className="mb-3 text-sm font-black">받을 가족 선택</p>
-        <div className="space-y-2">
-          {familyContacts.map((contact) => {
-            const checked = selectedIds.includes(contact.id);
-            return (
-              <button
-                key={contact.id}
-                onClick={() => toggleContact(contact.id)}
-                className={`flex w-full items-center rounded-xl border-2 p-3 text-left transition ${checked ? "border-blue-500 bg-blue-50" : "border-slate-200"}`}
-              >
-                <span className="flex h-10 w-10 items-center justify-center rounded-full bg-white text-xl shadow-sm">
-                  {contact.emoji}
-                </span>
-                <span className="ml-3">
-                  <b className="block text-sm">
-                    {contact.name} · {contact.relation}
-                  </b>
-                  <span className="text-xs text-slate-400">
-                    {contact.phone}
-                  </span>
-                </span>
-                <span
-                  className={`ml-auto flex h-6 w-6 items-center justify-center rounded-full text-xs font-black ${checked ? "bg-blue-600 text-white" : "border-2 border-slate-300"}`}
-                >
-                  {checked && "✓"}
-                </span>
-              </button>
-            );
-          })}
-        </div>
-      </div>
-      <div className="mt-5 grid grid-cols-2 gap-2">
-        {(["카카오 알림톡", "문자"] as const).map((item) => (
+      {guardians.length === 0 ? (
+        <>
+          <p className="mt-5 rounded-2xl bg-slate-50 p-5 text-center text-sm font-bold text-slate-400">
+            아직 연결된 보호자가 없어요.
+          </p>
+          <p className="mt-3 text-xs leading-5 text-slate-400">
+            마이페이지의 ‘보호자 연결 관리’에서 보호자를 연결하면 이곳에 보입니다.
+          </p>
           <button
-            key={item}
-            onClick={() => setMethod(item)}
-            className={`rounded-xl border-2 py-3 text-sm font-black ${method === item ? "border-blue-500 bg-blue-50 text-blue-700" : "border-slate-200 text-slate-500"}`}
+            onClick={onClose}
+            className="mt-6 w-full rounded-xl bg-slate-900 py-3 font-black text-white"
           >
-            {item === "카카오 알림톡" ? "💬 " : "✉ "}
-            {item}
+            확인
           </button>
-        ))}
-      </div>
-      <label className="mt-5 flex cursor-pointer items-center gap-3 rounded-xl bg-slate-50 p-3 text-sm font-bold text-slate-600">
-        <input
-          type="checkbox"
-          checked={includeSummary}
-          onChange={(event) => setIncludeSummary(event.target.checked)}
-          className="h-4 w-4 accent-blue-600"
-        />
-        알림에 요약 내용 포함하기
-      </label>
-      <p className="mt-3 text-xs leading-5 text-slate-400">
-        선택한 가족에게만 전송되며, 상세 기록은 본인 동의 없이 공개되지
-        않습니다.
-      </p>
-      <div className="mt-6 flex gap-3">
-        <button
-          onClick={onClose}
-          className="flex-1 rounded-xl bg-slate-100 py-3 font-black"
-        >
-          취소
-        </button>
-        <button
-          disabled={selectedIds.length === 0}
-          onClick={sendAlert}
-          className="flex-[1.5] rounded-xl bg-blue-600 py-3 font-black text-white shadow-lg shadow-blue-200 disabled:bg-slate-300 disabled:shadow-none"
-        >
-          {selectedIds.length}명에게 알림 보내기
-        </button>
-      </div>
+        </>
+      ) : (
+        <>
+          <div className="mt-6">
+            <p className="mb-3 text-sm font-black">받을 보호자 선택</p>
+            <div className="space-y-2">
+              {guardians.map((link) => {
+                const id = link.guardianId ?? "";
+                const checked = selectedIds.includes(id);
+                return (
+                  <button
+                    key={id}
+                    onClick={() => toggleContact(id)}
+                    className={`flex w-full items-center rounded-xl border-2 p-3 text-left transition ${checked ? "border-blue-500 bg-blue-50" : "border-slate-200"}`}
+                  >
+                    <span className="flex h-10 w-10 items-center justify-center rounded-full bg-white text-xl shadow-sm">
+                      👤
+                    </span>
+                    <span className="ml-3">
+                      <b className="block text-sm">
+                        {link.guardianName} · {link.relation || "가족"}
+                      </b>
+                      <span className="text-xs text-slate-400">
+                        {link.consentAt
+                          ? `${formatMoment(link.consentAt)} 연결 동의`
+                          : "연결됨"}
+                      </span>
+                    </span>
+                    <span
+                      className={`ml-auto flex h-6 w-6 items-center justify-center rounded-full text-xs font-black ${checked ? "bg-blue-600 text-white" : "border-2 border-slate-300"}`}
+                    >
+                      {checked && "✓"}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+          <label className="mt-5 flex cursor-pointer items-center gap-3 rounded-xl bg-slate-50 p-3 text-sm font-bold text-slate-600">
+            <input
+              type="checkbox"
+              checked={includeSummary}
+              onChange={(event) => setIncludeSummary(event.target.checked)}
+              className="h-4 w-4 accent-blue-600"
+            />
+            알림에 요약 내용 포함하기
+          </label>
+          <p className="mt-3 text-xs leading-5 text-slate-400">
+            선택한 보호자에게만 전송되며, 상세 기록은 본인 동의 없이 공개되지
+            않습니다. 전달 방법은 보호자가 마이페이지의 ‘알림 받을 방식’에서 직접
+            정합니다.
+          </p>
+          <div className="mt-6 flex gap-3">
+            <button
+              onClick={onClose}
+              className="flex-1 rounded-xl bg-slate-100 py-3 font-black"
+            >
+              취소
+            </button>
+            {/*
+              전송 엔드포인트가 생기면 이 버튼이 그것을 부릅니다. 눌리지 않는 버튼을 그대로
+              둔 이유: 이 자리가 무엇을 하는 곳인지는 알려 주되, 가지 않은 알림을 갔다고
+              말하지 않기 위해서입니다.
+            */}
+            <button
+              disabled
+              className="flex-[1.5] cursor-not-allowed rounded-xl bg-slate-200 py-3 font-black text-slate-500"
+            >
+              {selectedIds.length}명에게 알림 보내기
+            </button>
+          </div>
+          <p className="mt-3 text-center text-xs font-bold text-amber-700">
+            알림 전송은 준비 중이에요.
+          </p>
+        </>
+      )}
     </Modal>
   );
 }

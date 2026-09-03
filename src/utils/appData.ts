@@ -62,6 +62,21 @@ export function formatDate(iso?: string) {
 }
 
 /**
+ * 날짜 → "2026년 7월 2일 목요일". 홈 화면 눈썹 문구가 씁니다.
+ *
+ * 기본값이 오늘인 것에 의미가 있습니다. 예전에는 이 문구가 "2026년 7월 2일 목요일"이라는
+ * 문자열로 박혀 있어서, 어느 날 열어도 그날이라고 적혀 있었습니다.
+ */
+export function formatLongDate(now: Date = new Date()) {
+  return new Intl.DateTimeFormat('ko-KR', {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+    weekday: 'long',
+  }).format(now)
+}
+
+/**
  * 가입 시각(epoch millis) → 오늘까지의 일수. 가입 당일이 1일입니다. 값이 없으면 null.
  *
  * 양쪽을 자정으로 맞춘 뒤에 뺍니다. 그냥 빼서 86400000으로 나누면 가입한 지 23시간 된 사람과
