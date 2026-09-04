@@ -123,14 +123,81 @@ public class UserController {
         return ResultDTO.success("QUERY_COMPLETE", user);
     }
 
+    // ---- 가입 이메일 인증 ----
+    //
+    // 아이디 찾기·비밀번호 재설정과 같은 부품(sendVerificationCode, consumeCodeAttempt)을 쓰지만
+    // 관문이 정반대다. 저쪽은 그 주소로 가입한 계정이 있어야 통과하고, 여기는 없어야 통과한다.
+    // 그래서 searchId/sendCode를 그대로 돌려쓸 수 없다 — 아직 가입하지 않은 주소는 언제나
+    // USER_NOT_FOUND가 된다.
+    //
+    // 세션 키도 SESSION_FIND_ID_* / SESSION_RESET_* 과 따로 둔다. 한 브라우저에서 가입과
+    // 아이디 찾기를 나란히 열어 두면 나중에 받은 코드가 앞의 코드를 덮어쓴다.
+
+    /**
+     * 가입하려는 주소로 인증번호를 보낸다.
+     *
+     * <p>이미 가입된 주소에는 보내지 않는다. 보내 봐야 create가 DUPLICATE_EMAIL로 막고, 그
+     * 주소의 주인에게는 자기가 시키지 않은 인증 메일만 남는다.
+     */
+    @PostMapping(value = "signup/sendCode")
+    public ResultDTO<Void> signupSendCode(HttpServletRequest request, HttpSession session) {
+        String email = normalizeEmail(request.getParameter("email"));
+        if (email == null) return ResultDTO.error("MISSING_PARAMETER");
+        if (!EMAIL_PATTERN.matcher(email).matches()) return ResultDTO.error("INVALID_EMAIL");
+
+        try {
+            UserDTO exists = userService.getEmailExists(email);
+            if (exists != null && Boolean.TRUE.equals(exists.getExists()))
+                return ResultDTO.error("DUPLICATE_EMAIL");
+
+            String code = userService.sendVerificationCode(email);
+            if (code == null) return ResultDTO.error("MAIL_SEND_FAILED");
+
+            // 주소를 바꿔 다시 받으면 앞선 인증은 그 순간 무효다. 남겨 두면 A로 인증해 놓고
+            // B로 가입하는 길이 열린다.
+            session.removeAttribute("SESSION_SIGNUP_VERIFIED_EMAIL");
+
+            session.setAttribute("SESSION_SIGNUP_TARGET", email);
+            session.setAttribute("SESSION_SIGNUP_CODE", code);
+            session.setAttribute("SESSION_SIGNUP_EXPIRES", System.currentTimeMillis() + VERIFICATION_TTL_MS);
+            session.setAttribute("SESSION_SIGNUP_ATTEMPTS", 0);
+
+            return ResultDTO.success("SENT_CODE");
+        } catch (Exception e) {
+            log.warn("signupSendCode failed", e);
+            return ResultDTO.error("UNKNOWN_ERROR");
+        }
+    }
+
+    /** 코드를 맞히면 그 주소가 "인증된 주소"로 승격된다. create가 이 값과 대조한다. */
+    @PostMapping(value = "signup/verify")
+    public ResultDTO<Void> signupVerify(HttpServletRequest request, HttpSession session) {
+        String code = request.getParameter("code");
+        if (code == null) return ResultDTO.error("MISSING_PARAMETER");
+
+        String target = (String) session.getAttribute("SESSION_SIGNUP_TARGET");
+        if (target == null) return ResultDTO.error("INVALID_ACCESS");
+
+        if (!consumeCodeAttempt(session, "SESSION_SIGNUP_CODE", "SESSION_SIGNUP_EXPIRES",
+                                "SESSION_SIGNUP_ATTEMPTS", code)) {
+            return ResultDTO.error("INVALID_CODE");
+        }
+
+        session.removeAttribute("SESSION_SIGNUP_TARGET");
+        session.setAttribute("SESSION_SIGNUP_VERIFIED_EMAIL", target);
+
+        return ResultDTO.success("VERIFICATION_COMPLETE");
+    }
+
     /**
      * 회원가입.
      *
-     * <p>kindy와 달리 이메일 인증 단계가 없다. 그래서 이 행이 존재한다는 것이 곧 이메일이
-     * 검증됐다는 뜻은 아니다 — 나중에 인증을 붙이면 그때 IS_EMAIL_VERIFIED 컬럼이 필요해진다.
+     * <p>signup/verify를 통과한 주소로만 만들 수 있다. 다만 그 사실은 세션에만 남는다 —
+     * USER_INFO에 IS_EMAIL_VERIFIED 컬럼이 없으므로, 이 행이 존재한다는 것은 "만들 때 인증을
+     * 거쳤다"는 뜻이지 지금도 그 주소가 살아 있다는 보증은 아니다.
      */
     @PostMapping(value = "create")
-    public ResultDTO<Void> create(HttpServletRequest request) {
+    public ResultDTO<Void> create(HttpServletRequest request, HttpSession session) {
         String id = normalizeId(request.getParameter("id"));
         String password = request.getParameter("password");
         String name = request.getParameter("name");
@@ -146,6 +213,11 @@ public class UserController {
         if (name.trim().length() < 2) return ResultDTO.error("INVALID_NAME");
         if (!PHONE_PATTERN.matcher(phone).matches()) return ResultDTO.error("INVALID_PHONE");
         if (!EMAIL_PATTERN.matcher(email).matches()) return ResultDTO.error("INVALID_EMAIL");
+
+        // 인증을 마친 바로 그 주소로만 가입할 수 있다. 화면이 먼저 막아 주지만, 화면만 막은 것은
+        // 막은 것이 아니다 — 이 엔드포인트는 브라우저 밖에서도 부를 수 있다.
+        if (!email.equals(session.getAttribute("SESSION_SIGNUP_VERIFIED_EMAIL")))
+            return ResultDTO.error("EMAIL_NOT_VERIFIED");
 
         try {
             UserDTO pDTO = new UserDTO();
@@ -166,6 +238,10 @@ public class UserController {
 
             int res = userService.create(pDTO);
             if (res != 1) return ResultDTO.error("UNKNOWN_ERROR");
+
+            // 한 번 쓰면 끝. 다만 실패한 경우에는 남겨 둔다 — 아이디가 겹쳐 다시 시도하는
+            // 사람에게 인증부터 새로 시키는 것은 벌이지 안전이 아니다.
+            session.removeAttribute("SESSION_SIGNUP_VERIFIED_EMAIL");
 
             log.info("Signup complete: {}", id);
             return ResultDTO.success("SIGNUP_COMPLETE");
