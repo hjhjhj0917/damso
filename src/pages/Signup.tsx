@@ -8,9 +8,10 @@ import {
   normalizeId,
   normalizePhone,
   residentToBirthDate,
+  useEmailVerification,
   type AccountType,
 } from '../components/authShared'
-import { checkIdExists, errorMessage, signup } from '../utils/api'
+import { checkIdExists, errorMessage, signup, signupSendCode, signupVerify } from '../utils/api'
 
 type CheckStatus = 'idle' | 'checking' | 'available' | 'duplicate' | 'invalid'
 
@@ -26,7 +27,14 @@ function Signup() {
   const [residentFront, setResidentFront] = useState('')
   const [residentBackFirst, setResidentBackFirst] = useState('')
   const [phone, setPhone] = useState('')
-  const [email, setEmail] = useState('')
+  /**
+   * 이메일 인증. 아이디 찾기·비밀번호 재설정이 쓰는 훅을 그대로 씁니다 — 부르는 엔드포인트만
+   * 다르고, 발송 여부·확인 여부·에러 문구를 다루는 방식은 세 화면이 똑같아야 합니다.
+   *
+   * 주소를 고치면 훅이 인증 상태를 스스로 되돌립니다. 서버도 같은 판단을 하므로(인증된 주소와
+   * 가입 요청의 주소가 다르면 EMAIL_NOT_VERIFIED) 둘이 어긋날 일이 없습니다.
+   */
+  const verification = useEmailVerification({ onSend: signupSendCode, onVerify: signupVerify })
   const [checkStatus, setCheckStatus] = useState<CheckStatus>('idle')
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [error, setError] = useState('')
@@ -106,8 +114,12 @@ function Signup() {
       setError('올바른 전화번호를 입력해 주세요.')
       return
     }
-    if (!EMAIL_PATTERN.test(email.trim())) {
+    if (!EMAIL_PATTERN.test(verification.email.trim())) {
       setError('올바른 이메일 주소를 입력해 주세요.')
+      return
+    }
+    if (!verification.isVerified) {
+      setError('이메일 인증을 완료해 주세요.')
       return
     }
 
@@ -117,7 +129,7 @@ function Signup() {
       password,
       name: name.trim(),
       phone: normalizedPhone,
-      email: email.trim().toLowerCase(),
+      email: verification.email.trim().toLowerCase(),
       roles: accountType === 'guardian' ? 'GUARDIAN' : 'USER',
       birthDate,
     })
@@ -127,6 +139,8 @@ function Signup() {
       // 중복확인을 통과한 뒤 다른 사람이 먼저 그 아이디로 가입했을 수 있다. 그때는
       // 확인 상태를 되돌려 다시 확인하게 한다.
       if (result.code === 'DUPLICATE_ID') setCheckStatus('duplicate')
+      // 인증이 만료됐거나(세션 10분) 그 사이 주소가 바뀐 경우다. 발송부터 다시 하게 되돌린다.
+      if (result.code === 'EMAIL_NOT_VERIFIED') verification.resetVerification()
       setError(errorMessage(result))
       return
     }
@@ -136,7 +150,15 @@ function Signup() {
   }
 
   return (
-    <main className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-sky-50 px-5 py-12 lg:h-screen lg:min-h-0 lg:overflow-hidden lg:py-0">
+    /*
+      lg에서는 이 화면이 딱 한 번만 스크롤됩니다 — 오른쪽 입력 영역 안에서.
+
+      높이를 lg:h-screen으로 두면 위의 헤더(Header.tsx의 h-20 = 5rem, 아래 테두리 1px)만큼
+      문서가 넘쳐 브라우저 오른쪽 끝에 페이지 스크롤바가 하나 더 생깁니다. 그 둘은 같이
+      움직이기 때문에, 폼만 굴리려고 안쪽에 스크롤을 둔 의도가 사라집니다. 그래서 화면에서
+      헤더를 뺀 나머지를 정확히 차지하게 하고, 넘치는 부분은 안쪽에서만 처리합니다.
+    */
+    <main className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-sky-50 px-5 py-12 lg:h-[calc(100vh_-_5rem_-_1px)] lg:min-h-0 lg:overflow-hidden lg:py-0">
       <section className="mx-auto grid max-w-6xl items-center gap-10 lg:h-full lg:grid-cols-[1fr_520px] lg:grid-rows-1">
         {/* 왼쪽 소개 영역은 화면 중앙에 고정하고, 스크롤은 오른쪽 입력 영역에서만 일어나게 합니다. */}
         <div className="hidden min-h-0 lg:block">
@@ -155,7 +177,7 @@ function Signup() {
           </div>
         </div>
 
-        <div className="lg:min-h-0 lg:self-stretch lg:overflow-y-auto lg:py-12">
+        <div className="lg:min-h-0 lg:self-stretch lg:overflow-y-auto lg:py-12 lg:no-scrollbar">
           <form onSubmit={handleSubmit} className="rounded-[2rem] bg-white p-7 shadow-2xl sm:p-9">
             <div className="mb-8 text-center">
               <img src="/logo.svg" alt="담소" className="mx-auto h-16 w-16 rounded-3xl shadow-lg" />
@@ -232,14 +254,61 @@ function Signup() {
                     <span className="ml-1 font-black tracking-[0.12em] text-slate-400">******</span>
                   </div>
                 </div>
-                <Message>보호자 계정을 연결할 때 본인 확인에 사용되며, 주민등록번호는 저장되지 않고 생년월일만 남습니다.</Message>
               </div>
               <Field label="전화번호"><input value={phone} onChange={(event) => { setPhone(event.target.value.replace(/\D/g, '').slice(0, 11)); setError('') }} type="tel" inputMode="numeric" placeholder="01012345678" className={AUTH_INPUT_CLASS} /></Field>
 
-              <Field label="이메일">
-                <input value={email} onChange={(event) => { setEmail(event.target.value); setError('') }} type="email" placeholder="example@email.com" className={AUTH_INPUT_CLASS} />
-                <Message>아이디와 비밀번호를 잊었을 때 본인 확인에 사용됩니다.</Message>
-              </Field>
+              {/*
+                아이디 중복확인과 같은 모양입니다 — 입력칸 안쪽 오른쪽에 버튼을 얹고, 결과는
+                칸 아래 한 줄로 알립니다. 두 칸이 하는 일(입력한 값을 서버에 물어보고 그
+                답에 따라 다음으로 넘어간다)이 같으니 생김새도 같아야 합니다.
+              */}
+              <div>
+                <label className="mb-2 block text-lg font-extrabold text-slate-800">이메일</label>
+                <div className="relative">
+                  <input
+                    value={verification.email}
+                    onChange={(event) => { verification.setEmail(event.target.value); setError('') }}
+                    type="email"
+                    placeholder="example@email.com"
+                    className={`${AUTH_INPUT_CLASS} pr-40`}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => { setError(''); void verification.requestAuth() }}
+                    disabled={verification.isPending || verification.isVerified}
+                    className="absolute right-2 top-1/2 h-12 -translate-y-1/2 rounded-xl bg-blue-600 px-5 font-black text-white disabled:bg-slate-300"
+                  >
+                    {verification.isVerified ? '인증완료' : verification.isPending ? '처리 중' : verification.isAuthRequested ? '재발송' : '인증번호 발송'}
+                  </button>
+                </div>
+                {verification.isVerified && <Message>이메일 인증이 완료되었습니다.</Message>}
+                {verification.isAuthRequested && !verification.isVerified && <Message>메일로 보낸 6자리 번호를 10분 안에 입력해 주세요.</Message>}
+                {verification.error && <Message error>{verification.error}</Message>}
+              </div>
+
+              {/* 발송 전에는 그리지 않습니다. 채울 수 없는 칸이 미리 보이면 무엇을 먼저 해야 하는지 흐려집니다. */}
+              {verification.isAuthRequested && !verification.isVerified && (
+                <div>
+                  <label className="mb-2 block text-lg font-extrabold text-slate-800">인증번호</label>
+                  <div className="relative">
+                    <input
+                      value={verification.authCode}
+                      onChange={(event) => verification.setAuthCode(event.target.value.replace(/\D/g, '').slice(0, 6))}
+                      inputMode="numeric"
+                      placeholder="123456"
+                      className={`${AUTH_INPUT_CLASS} pr-24`}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => void verification.verify()}
+                      disabled={verification.isPending || verification.authCode.length < 6}
+                      className="absolute right-2 top-1/2 h-12 -translate-y-1/2 rounded-xl bg-slate-900 px-5 font-black text-white disabled:bg-slate-300"
+                    >
+                      확인
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
 
             {error && <p className="mt-6 rounded-2xl bg-red-50 px-5 py-4 text-lg font-bold text-red-600">{error}</p>}

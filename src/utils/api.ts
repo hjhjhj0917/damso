@@ -50,6 +50,7 @@ const MESSAGES: Record<string, string> = {
   INVALID_CODE: '인증번호가 맞지 않습니다.',
   INVALID_ACCESS: '로그인이 필요하거나 권한이 없습니다.',
   MAIL_SEND_FAILED: '인증 메일을 보내지 못했습니다. 잠시 후 다시 시도해 주세요.',
+  EMAIL_NOT_VERIFIED: '이메일 인증을 완료해 주세요.',
   NETWORK_ERROR: '서버에 연결할 수 없습니다. 잠시 후 다시 시도해 주세요.',
   NOT_FOUND: '요청하신 내용을 찾을 수 없습니다.',
   // AI 기능의 두 실패를 갈라 말합니다. 앞은 사용자가 기다려도 소용없고(운영자가 켜야 합니다),
@@ -140,6 +141,20 @@ export const signup = (params: {
   /** YYYY-MM-DD. 주민등록번호 앞 6자리·뒷자리 첫 숫자를 프론트에서 환산한 값입니다. */
   birthDate: string
 }) => post('/api/user/create', params)
+
+// ================= 가입 이메일 인증 =================
+//
+// 아이디 찾기의 searchId/* 와 부품은 같지만(같은 메일 발송, 같은 코드 검증) 관문이 정반대입니다.
+// 저쪽은 그 주소로 가입한 계정이 있어야 통과하고, 여기는 없어야 통과합니다 — 이미 가입된
+// 주소면 서버가 DUPLICATE_EMAIL로 돌려보냅니다.
+//
+// verify에 이메일을 함께 보내지 않는 것에 의미가 있습니다. 어떤 주소를 인증하는 중이었는지는
+// 서버가 발송 시점에 세션에 적어 두므로 코드만 맞히면 됩니다. 화면이 주소를 같이 보내면,
+// 코드를 받은 주소와 다른 주소를 인증된 것으로 만들 수 있는 길이 열립니다.
+
+export const signupSendCode = (email: string) => post('/api/user/signup/sendCode', { email })
+
+export const signupVerify = (code: string) => post('/api/user/signup/verify', { code })
 
 // ================= 로그인 =================
 

@@ -20,3 +20,20 @@ button,
 a {
   -webkit-tap-highlight-color: transparent;
 }
+
+/*
+  스크롤은 그대로 두고 스크롤바만 감춥니다. overflow: hidden 과는 다릅니다 — 휠·터치·키보드로
+  굴러가는 것은 똑같고, 브라우저가 그리는 막대만 사라집니다.
+
+  세 줄이 필요한 이유는 브라우저마다 방법이 다르기 때문입니다. scrollbar-width 는 표준이고
+  (Firefox 와 최신 Chrome), ::-webkit-scrollbar 는 그 표준이 생기기 전의 Safari·구형 Chrome,
+  -ms-overflow-style 은 구형 Edge 몫입니다. 하나만 적으면 어느 한쪽에서 막대가 남습니다.
+*/
+@utility no-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
