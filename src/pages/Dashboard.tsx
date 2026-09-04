@@ -120,6 +120,14 @@ function Dashboard() {
   const [chapters, setChapters] = useState<ApiAutobiography[]>([]);
   const [schedules, setSchedules] = useState<ApiSchedule[]>([]);
   const [links, setLinks] = useState<ApiLink[]>([]);
+  /**
+   * 연결 목록을 서버에 물어보고 답을 받았는지. "아직 안 물어봤다"와 "물어봤더니 없더라"는
+   * 다른 상태입니다.
+   *
+   * 이 둘을 links.length === 0 하나로 뭉뚱그리면, 연결이 있는 보호자가 새로고침할 때마다
+   * 응답이 오기 전의 빈 배열을 보고 "연결 없음"으로 판단해 마이페이지로 밀려납니다.
+   */
+  const [linksLoaded, setLinksLoaded] = useState(false);
   const [toast, setToast] = useState<Toast | null>(null);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [supportCallOpen, setSupportCallOpen] = useState(false);
@@ -184,7 +192,10 @@ function Dashboard() {
       ),
     [notificationsEnabled],
   );
+  // 연결 목록을 받기 전에는 옮기지 않습니다. 아직 모르는 것을 "없다"로 읽으면, 연결이 있는
+  // 보호자도 새로고침할 때마다 보던 화면을 잃고 마이페이지로 떨어집니다.
   useEffect(() => {
+    if (!linksLoaded) return;
     if (
       isGuardian &&
       !hasLinkedParent &&
@@ -192,7 +203,7 @@ function Dashboard() {
     ) {
       navigate("/dashboard/mypage", { replace: true });
     }
-  }, [activeTab, hasLinkedParent, isGuardian, navigate]);
+  }, [linksLoaded, activeTab, hasLinkedParent, isGuardian, navigate]);
   useEffect(() => {
     if (!toast) return;
     const timer = window.setTimeout(() => setToast(null), 2600);
@@ -237,6 +248,9 @@ function Dashboard() {
   const reloadLinks = async () => {
     const result = await fetchLinks();
     if (result.status === "success" && result.data) setLinks(result.data);
+    // 실패해도 세웁니다. 여기서 세우지 않으면 서버가 한 번 대답하지 못한 것만으로 화면이
+    // 영영 확인 중에 머물러, 연결이 없는 보호자도 마이페이지로 안내받지 못합니다.
+    setLinksLoaded(true);
   };
 
   useEffect(() => {
