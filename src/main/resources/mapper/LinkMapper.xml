@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTO Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="hanium.damso.mapper.ILinkMapper">
+    <!--
+        피보호인 대조.
+
+        damso가 가진 NOT NULL 신원 컬럼은 USER_NAME과 PHONE 둘뿐이다. BIRTH_DATE는 가입 때 받지
+        않아서 대부분 NULL이고(USER_INFO.BIRTH_DATE 컬럼 주석), 필수 조건으로 걸면 아무도 연결하지
+        못한다. 그래서 "값이 있으면 맞아야 한다"로 쓴다 — 채워 넣은 사람에게는 검증이 하나 늘고,
+        안 채운 사람에게는 문이 닫히지 않는다.
+
+        ROLES = 'USER'로 좁힌다. 보호자 계정끼리 연결되거나 운영자 계정이 피보호인이 될 수 없다.
+
+        보호자가 입력한 생년월일로 BIRTH_DATE를 채워 넣고 싶은 유혹이 있다. 이 값을 배우는 유일한
+        경로이기 때문이다. 하지 않는다 — 이름과 전화번호만 맞히면 남의 계정 신원 컬럼에 글을 쓸 수
+        있게 된다.
+    -->
+    <select id="selectWardCandidates" resultType="hanium.damso.dto.UserDTO">
+        SELECT USER_ID AS ID, USER_NAME AS NAME, PHONE, ROLES, BIRTH_DATE
+        FROM USER_INFO
+        WHERE USER_NAME = #{name}
+          AND PHONE = #{phone}
+          AND ROLES = 'USER'
+          AND IS_DELETED = 'N'
+          AND (BIRTH_DATE IS NULL OR BIRTH_DATE = #{birthDate})
+    </select>
+
+    <!--
+        UK_USER_LINK_PAIR에 IS_DELETED가 없다. 연결을 끊어도 행은 남아 유니크 키를 계속 점유하므로,
+        같은 보호자-피보호인 쌍을 다시 연결하는 순진한 INSERT는 중복키로 터진다.
+        UserMapper.xml의 getIdExists 주석이 USER_INFO에 대해 설명한 것과 같은 함정이다.
+
+        그래서 넣는 게 아니라 되살린다. LINK_ID는 살아나는 경우 바뀌지 않는다 — 이미 있는 행의
+        키를 갈아 끼울 이유가 없다.
+    -->
+    <insert id="insertLink">
+        INSERT INTO USER_LINK (LINK_ID, GUARDIAN_ID, WARD_ID, RELATION, CONSENT_AT)
+        VALUES (#{id}, #{guardianId}, #{wardId}, #{relation}, NOW())
+        ON DUPLICATE KEY UPDATE IS_DELETED = 'N',
+                                DELETED_AT = NULL,
+                                RELATION   = #{relation},
+                                CONSENT_AT = NOW()
+    </insert>
+
+    <sql id="columns">
+        L.LINK_ID AS ID,
+        L.GUARDIAN_ID,
+        G.USER_NAME AS GUARDIAN_NAME,
+        L.WARD_ID,
+        W.USER_NAME AS WARD_NAME,
+        W.PHONE AS WARD_PHONE,
+        L.RELATION,
+        UNIX_TIMESTAMP(L.CONSENT_AT) * 1000 AS CONSENT_AT,
+        UNIX_TIMESTAMP(L.CREATED_AT) * 1000 AS CREATED_AT
+    </sql>
+
+    <sql id="joins">
+        FROM USER_LINK L
+        JOIN USER_INFO G ON G.USER_ID = L.GUARDIAN_ID
+        JOIN USER_INFO W ON W.USER_ID = L.WARD_ID
+        WHERE L.IS_DELETED = 'N'
+    </sql>
+
+    <select id="selectLink" resultType="hanium.damso.dto.LinkDTO">
+        SELECT <include refid="columns"/>
+        <include refid="joins"/>
+          AND L.GUARDIAN_ID = #{guardianId}
+          AND L.WARD_ID = #{wardId}
+    </select>
+
+    <select id="selectWards" resultType="hanium.damso.dto.LinkDTO">
+        SELECT <include refid="columns"/>
+        <include refid="joins"/>
+          AND L.GUARDIAN_ID = #{guardianId}
+        ORDER BY L.CREATED_AT
+    </select>
+
+    <select id="selectGuardians" resultType="hanium.damso.dto.LinkDTO">
+        SELECT <include refid="columns"/>
+        <include refid="joins"/>
+          AND L.WARD_ID = #{wardId}
+        ORDER BY L.CREATED_AT
+    </select>
+
+    <!--
+        연결 해제는 양쪽 누구나 할 수 있고 상대 동의가 필요 없다. 동의로 시작한 관계라도 끊는 데
+        상대 허락이 필요하면 그것은 동의가 아니다.
+    -->
+    <update id="deleteLink">
+        UPDATE USER_LINK
+        SET IS_DELETED = 'Y',
+            DELETED_AT = NOW()
+        WHERE GUARDIAN_ID = #{guardianId}
+          AND WARD_ID = #{wardId}
+          AND IS_DELETED = 'N'
+    </update>
+</mapper>

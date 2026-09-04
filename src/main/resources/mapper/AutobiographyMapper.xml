@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTO Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="hanium.damso.mapper.IAutobiographyMapper">
+    <sql id="alive">
+        FROM AUTOBIOGRAPHY A
+        JOIN CONTENT_MASTER CM ON CM.CONTENT_ID = A.CONTENT_ID
+        WHERE CM.IS_DELETED = 'N'
+    </sql>
+
+    <sql id="columns">
+        A.AUTOBIOGRAPHY_ID AS ID,
+        A.CONTENT_ID,
+        CM.USER_ID,
+        A.TITLE,
+        A.PERIOD,
+        A.SUMMARY,
+        A.CONTENT,
+        A.STATUS,
+        UNIX_TIMESTAMP(CM.CREATED_AT) * 1000 AS CREATED_AT,
+        UNIX_TIMESTAMP(CM.UPDATED_AT) * 1000 AS UPDATED_AT
+    </sql>
+
+    <select id="selectList" resultType="hanium.damso.dto.AutobiographyDTO">
+        SELECT <include refid="columns"/>
+        <include refid="alive"/>
+          AND CM.USER_ID = #{userId}
+        ORDER BY CM.CREATED_AT
+    </select>
+
+    <select id="selectAutobiography" resultType="hanium.damso.dto.AutobiographyDTO">
+        SELECT <include refid="columns"/>
+        <include refid="alive"/>
+          AND A.AUTOBIOGRAPHY_ID = #{id}
+    </select>
+
+    <insert id="insertAutobiography">
+        INSERT INTO AUTOBIOGRAPHY (AUTOBIOGRAPHY_ID, CONTENT_ID, TITLE, PERIOD, CONTENT, SUMMARY, STATUS)
+        VALUES (#{id}, #{contentId}, #{title}, #{period}, #{content}, #{summary}, #{status})
+    </insert>
+
+    <update id="updateAutobiography">
+        UPDATE AUTOBIOGRAPHY A
+        JOIN CONTENT_MASTER CM ON CM.CONTENT_ID = A.CONTENT_ID
+        <set>
+            <if test="title != null">A.TITLE = #{title},</if>
+            <if test="period != null">A.PERIOD = #{period},</if>
+            <if test="summary != null">A.SUMMARY = #{summary},</if>
+            <if test="content != null">A.CONTENT = #{content},</if>
+            <if test="status != null">A.STATUS = #{status},</if>
+        </set>
+        WHERE A.AUTOBIOGRAPHY_ID = #{id}
+          AND CM.USER_ID = #{userId}
+          AND CM.IS_DELETED = 'N'
+    </update>
+</mapper>

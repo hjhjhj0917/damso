@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTO Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="hanium.damso.mapper.IDiaryMapper">
+    <sql id="alive">
+        FROM DIARY D
+        JOIN CONTENT_MASTER CM ON CM.CONTENT_ID = D.CONTENT_ID
+        WHERE CM.IS_DELETED = 'N'
+    </sql>
+
+    <sql id="columns">
+        D.DIARY_ID AS ID,
+        D.CONTENT_ID,
+        CM.USER_ID,
+        D.DIARY_DATE AS `DATE`,
+        D.TITLE,
+        D.CONTENT,
+        D.MOOD,
+        D.HEALTH,
+        UNIX_TIMESTAMP(CM.CREATED_AT) * 1000 AS CREATED_AT,
+        UNIX_TIMESTAMP(CM.UPDATED_AT) * 1000 AS UPDATED_AT,
+        (SELECT COUNT(*) FROM DIARY_COMMENT C
+          WHERE C.DIARY_ID = D.DIARY_ID AND C.IS_DELETED = 'N') AS COMMENT_COUNT
+    </sql>
+
+    <resultMap id="diaryMap" type="hanium.damso.dto.DiaryDTO">
+        <id property="id" column="ID"/>
+        <result property="contentId" column="CONTENT_ID"/>
+        <result property="userId" column="USER_ID"/>
+        <result property="date" column="DATE"/>
+        <result property="title" column="TITLE"/>
+        <result property="content" column="CONTENT"/>
+        <result property="mood" column="MOOD"/>
+        <result property="health" column="HEALTH"/>
+        <result property="createdAt" column="CREATED_AT"/>
+        <result property="updatedAt" column="UPDATED_AT"/>
+        <result property="commentCount" column="COMMENT_COUNT"/>
+        <collection property="tags" javaType="java.util.ArrayList" ofType="java.lang.String"
+                    select="selectTags" column="{diaryId=ID}"/>
+    </resultMap>
+
+    <select id="selectTags" resultType="java.lang.String">
+        SELECT TAG
+        FROM DIARY_TAG
+        WHERE DIARY_ID = #{diaryId}
+        ORDER BY SORT_NO
+    </select>
+
+    <select id="selectList" resultMap="diaryMap">
+        SELECT <include refid="columns"/>
+        <include refid="alive"/>
+          AND CM.USER_ID = #{userId}
+        ORDER BY D.DIARY_DATE DESC, CM.CREATED_AT DESC
+    </select>
+
+    <select id="selectDiary" resultMap="diaryMap">
+        SELECT <include refid="columns"/>
+        <include refid="alive"/>
+          AND D.DIARY_ID = #{id}
+    </select>
+
+    <select id="selectByDate" resultMap="diaryMap">
+        SELECT <include refid="columns"/>
+        <include refid="alive"/>
+          AND CM.USER_ID = #{userId}
+          AND D.DIARY_DATE = #{date}
+        ORDER BY CM.CREATED_AT DESC
+        LIMIT 1
+    </select>
+
+    <insert id="insertDiary">
+        INSERT INTO DIARY (DIARY_ID, CONTENT_ID, DIARY_DATE, TITLE, MOOD, CONTENT, HEALTH)
+        VALUES (#{id}, #{contentId}, #{date}, #{title}, #{mood}, #{content}, #{health})
+    </insert>
+
+    <!--
+        다중 표 UPDATE다. 소유자 조건(CM.USER_ID)을 문장 안에 두려면 조인이 필요하고, 밖에서
+        확인하고 고치면 확인과 수정 사이가 벌어진다 — ContentMapper.deleteContent와 같은 이유.
+    -->
+    <update id="updateDiary">
+        UPDATE DIARY D
+        JOIN CONTENT_MASTER CM ON CM.CONTENT_ID = D.CONTENT_ID
+        <set>
+            <if test="date != null">D.DIARY_DATE = #{date},</if>
+            <if test="title != null">D.TITLE = #{title},</if>
+            <if test="content != null">D.CONTENT = #{content},</if>
+            <if test="mood != null">D.MOOD = #{mood},</if>
+            <if test="health != null">D.HEALTH = #{health},</if>
+        </set>
+        WHERE D.DIARY_ID = #{id}
+          AND CM.USER_ID = #{userId}
+          AND CM.IS_DELETED = 'N'
+    </update>
+
+    <insert id="insertTag">
+        INSERT INTO DIARY_TAG (TAG_ID, DIARY_ID, TAG, SORT_NO)
+        VALUES (#{tagId}, #{diaryId}, #{tag}, #{sortNo})
+    </insert>
+
+    <delete id="deleteTags">
+        DELETE FROM DIARY_TAG WHERE DIARY_ID = #{diaryId}
+    </delete>
+</mapper>
