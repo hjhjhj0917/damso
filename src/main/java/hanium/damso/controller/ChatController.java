@@ -119,7 +119,7 @@ public class ChatController {
 
         // 여기부터는 무슨 일이 있어도 sent를 실어 보낸다.
         try {
-            ChatDTO.MessageDTO reply = chatService.requestReply(roomId, userName);
+            ChatDTO.MessageDTO reply = chatService.requestReply(roomId, userId, userName);
             if (reply == null)
                 return ResultDTO.error("GENERATION_FAILED", new ChatDTO.TurnDTO(sent, null));
 

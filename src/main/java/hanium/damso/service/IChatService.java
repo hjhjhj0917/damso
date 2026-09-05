@@ -31,5 +31,5 @@ public interface IChatService {
      *
      * @throws ServiceUnavailableException 모델이 설정되지 않았거나 키가 거절당했을 때
      */
-    ChatDTO.MessageDTO requestReply(String roomId, String userName) throws Exception;
+    ChatDTO.MessageDTO requestReply(String roomId, String userId, String userName) throws Exception;
 }

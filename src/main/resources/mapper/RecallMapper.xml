@@ -1,0 +1,208 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTO Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="hanium.damso.mapper.IRecallMapper">
+    <!--
+        RECALL_KEYWORD는 CONTENT_MASTER를 거치지 않는다. USER_ID와 IS_DELETED를 직접 들고 있고,
+        무엇보다 이 표는 어르신의 '기록'이 아니라 보호자와 함께 관리하는 설정값이다. 마스터에
+        얹으면 소유자만 고칠 수 있는 경로에 딸려 들어가, 보호자가 편집할 수 없게 된다.
+    -->
+    <sql id="alive">
+        FROM RECALL_KEYWORD K
+        WHERE K.IS_DELETED = 'N'
+    </sql>
+
+    <sql id="keywordColumns">
+        K.KEYWORD_ID AS ID,
+        K.USER_ID,
+        K.CATEGORY,
+        K.TERM,
+        K.ANSWER,
+        K.HINT,
+        K.CREATED_BY,
+        UNIX_TIMESTAMP(K.LAST_ASKED_AT) * 1000 AS LAST_ASKED_AT,
+        UNIX_TIMESTAMP(K.CREATED_AT) * 1000 AS CREATED_AT,
+        UNIX_TIMESTAMP(K.UPDATED_AT) * 1000 AS UPDATED_AT
+    </sql>
+
+    <select id="selectKeywords" resultType="hanium.damso.dto.RecallDTO">
+        SELECT <include refid="keywordColumns"/>
+        <include refid="alive"/>
+          AND K.USER_ID = #{userId}
+        ORDER BY K.CREATED_AT, K.KEYWORD_ID
+    </select>
+
+    <select id="selectKeyword" resultType="hanium.damso.dto.RecallDTO">
+        SELECT <include refid="keywordColumns"/>
+        <include refid="alive"/>
+          AND K.KEYWORD_ID = #{id}
+    </select>
+
+    <!--
+        회전 규칙. LAST_ASKED_AT이 NULL인 것(= 한 번도 안 물어본 것)이 먼저다.
+    -->
+    <select id="selectAskTarget" resultType="hanium.damso.dto.RecallDTO">
+        SELECT <include refid="keywordColumns"/>
+        <include refid="alive"/>
+          AND K.USER_ID = #{userId}
+          AND (K.LAST_ASKED_AT IS NULL
+               OR K.LAST_ASKED_AT &lt; DATE_SUB(NOW(), INTERVAL #{coolDays} DAY))
+        ORDER BY K.LAST_ASKED_AT IS NOT NULL, K.LAST_ASKED_AT, K.CREATED_AT
+        LIMIT 1
+    </select>
+
+    <select id="countKeywords" resultType="int">
+        SELECT COUNT(*)
+        <include refid="alive"/>
+          AND K.USER_ID = #{userId}
+    </select>
+
+    <insert id="insertKeyword">
+        INSERT INTO RECALL_KEYWORD (KEYWORD_ID, USER_ID, CATEGORY, TERM, ANSWER, HINT, CREATED_BY)
+        VALUES (#{id}, #{userId}, #{category}, #{term}, #{answer}, #{hint}, #{createdBy})
+    </insert>
+
+    <!--
+        <set>이 통째로 비면 SQL 문법 오류가 난다. 호출자(RecallService)가 바꿀 것이 하나도
+        없는 요청을 먼저 걸러 내므로 여기서는 다시 보지 않는다.
+
+        USER_ID는 갱신 대상이 아니다. 키워드를 남의 계정으로 옮기는 길을 열 이유가 없다.
+    -->
+    <update id="updateKeyword">
+        UPDATE RECALL_KEYWORD
+        <set>
+            <if test="category != null">CATEGORY = #{category},</if>
+            <if test="term != null">TERM = #{term},</if>
+            <if test="answer != null">ANSWER = #{answer},</if>
+            <if test="hint != null">HINT = #{hint},</if>
+        </set>
+        WHERE KEYWORD_ID = #{id}
+          AND USER_ID = #{userId}
+          AND IS_DELETED = 'N'
+    </update>
+
+    <!--
+        기록(RECALL_LOG)은 남긴다. 키워드를 지웠다고 지난 검사 결과까지 사라지면 리포트의
+        과거 수치가 조용히 바뀐다. FK도 그래서 CASCADE가 아니다.
+    -->
+    <update id="deleteKeyword">
+        UPDATE RECALL_KEYWORD
+        SET IS_DELETED = 'Y',
+            DELETED_AT = NOW()
+        WHERE KEYWORD_ID = #{id}
+          AND USER_ID = #{userId}
+          AND IS_DELETED = 'N'
+    </update>
+
+    <update id="touchAsked">
+        UPDATE RECALL_KEYWORD
+        SET LAST_ASKED_AT = NOW()
+        WHERE KEYWORD_ID = #{keywordId}
+    </update>
+
+    <!-- ================= 검사 기록 ================= -->
+
+    <!--
+        ASKED_AT은 컬럼 기본값(CURRENT_TIMESTAMP(3))에 맡긴다. CHAT.SENT_AT과 같은 이유다 —
+        애플리케이션 서버와 DB의 시계가 다르면 순서가 뒤집힌다.
+    -->
+    <insert id="insertLog">
+        INSERT INTO RECALL_LOG (LOG_ID, USER_ID, KEYWORD_ID, ROOM_ID, ASK_MESSAGE_ID, RESULT)
+        VALUES (#{id}, #{userId}, #{keywordId}, #{roomId}, #{askMessageId}, 'ASKED')
+    </insert>
+
+    <sql id="logColumns">
+        L.LOG_ID AS ID,
+        L.USER_ID,
+        L.KEYWORD_ID,
+        L.ROOM_ID,
+        L.ASK_MESSAGE_ID,
+        L.ANSWER_MESSAGE_ID,
+        L.RESULT,
+        CAST(UNIX_TIMESTAMP(L.ASKED_AT) * 1000 AS SIGNED) AS ASKED_AT,
+        CAST(UNIX_TIMESTAMP(L.CHECKED_AT) * 1000 AS SIGNED) AS CHECKED_AT
+    </sql>
+
+    <!--
+        TTL을 SQL에서 거른다. 30분이 지나도록 답이 없었다면 어르신은 그 질문에 답하지 않고
+        화제를 옮긴 것이고, 한참 뒤의 엉뚱한 발화를 그 질문의 답으로 채점하면 안 된다.
+    -->
+    <select id="selectPendingLog" resultType="hanium.damso.dto.RecallDTO$LogDTO">
+        SELECT <include refid="logColumns"/>
+        FROM RECALL_LOG L
+        WHERE L.ROOM_ID = #{roomId}
+          AND L.RESULT = 'ASKED'
+          AND L.ASKED_AT &gt;= DATE_SUB(NOW(), INTERVAL #{ttlMinutes} MINUTE)
+        ORDER BY L.ASKED_AT DESC, L.LOG_ID DESC
+        LIMIT 1
+    </select>
+
+    <!-- RESULT = 'ASKED' 조건이 재채점을 막는다. -->
+    <update id="gradeLog">
+        UPDATE RECALL_LOG
+        SET RESULT = #{result},
+            ANSWER_MESSAGE_ID = #{answerMessageId},
+            CHECKED_AT = CURRENT_TIMESTAMP(3)
+        WHERE LOG_ID = #{logId}
+          AND RESULT = 'ASKED'
+    </update>
+
+    <select id="countAskedToday" resultType="int">
+        SELECT COUNT(*)
+        FROM RECALL_LOG L
+        WHERE L.USER_ID = #{userId}
+          AND L.ASKED_AT &gt;= CURDATE()
+          AND L.ASKED_AT &lt; DATE_ADD(CURDATE(), INTERVAL 1 DAY)
+    </select>
+
+    <!-- ================= 집계 ================= -->
+
+    <!--
+        RESULT = 'ASKED'인 행은 어디서도 세지 않는다. 물어봤지만 답을 듣지 못한 것이라
+        성공도 실패도 아니다. 실패로 세면 대화를 피한 일이 인지 저하로 둔갑한다.
+
+        SUM(...)은 매치가 없으면 NULL을 준다. COALESCE로 0을 만들어야 Integer 필드에
+        null이 들어가 화면에서 "—"로 보이는 일이 없다.
+    -->
+    <sql id="window">
+        FROM RECALL_LOG L
+        WHERE L.USER_ID = #{userId}
+          AND L.RESULT &lt;&gt; 'ASKED'
+          AND L.ASKED_AT &gt;= CONCAT(#{from}, ' 00:00:00')
+          AND L.ASKED_AT &lt;= CONCAT(#{to}, ' 23:59:59.999')
+    </sql>
+
+    <select id="selectSummary" resultType="hanium.damso.dto.RecallDTO$ReportDTO">
+        SELECT COUNT(*) AS ASKED,
+               COALESCE(SUM(L.RESULT = 'HIT'), 0) AS HIT,
+               COALESCE(SUM(L.RESULT = 'MISS'), 0) AS MISS,
+               COALESCE(SUM(L.RESULT = 'UNCLEAR'), 0) AS UNCLEAR
+        <include refid="window"/>
+    </select>
+
+    <!--
+        WEEK 버킷의 첫날을 WEEKDAY()로 잡는다. WEEK()나 YEARWEEK()가 아닌 이유:
+        주 번호를 주지, 그 주의 날짜를 주지 않는다. 화면은 라벨에 쓸 날짜가 필요하고,
+        연말에 주 번호가 1로 돌아가면 정렬도 깨진다. WEEKDAY()는 월요일이 0이다.
+    -->
+    <select id="selectBuckets" resultType="hanium.damso.dto.RecallDTO$BucketDTO">
+        SELECT
+        <choose>
+            <when test="unit == 'MONTH'">DATE_FORMAT(L.ASKED_AT, '%Y-%m-01')</when>
+            <when test="unit == 'WEEK'">
+                DATE_FORMAT(DATE_SUB(L.ASKED_AT, INTERVAL WEEKDAY(L.ASKED_AT) DAY), '%Y-%m-%d')
+            </when>
+            <otherwise>DATE_FORMAT(L.ASKED_AT, '%Y-%m-%d')</otherwise>
+        </choose> AS `DATE`,
+               COUNT(*) AS ASKED,
+               COALESCE(SUM(L.RESULT = 'HIT'), 0) AS HIT,
+               COALESCE(SUM(L.RESULT = 'MISS'), 0) AS MISS
+        FROM RECALL_LOG L
+        WHERE L.USER_ID = #{q.userId}
+          AND L.RESULT &lt;&gt; 'ASKED'
+          AND L.ASKED_AT &gt;= CONCAT(#{q.from}, ' 00:00:00')
+          AND L.ASKED_AT &lt;= CONCAT(#{q.to}, ' 23:59:59.999')
+        GROUP BY `DATE`
+        ORDER BY `DATE`
+    </select>
+</mapper>

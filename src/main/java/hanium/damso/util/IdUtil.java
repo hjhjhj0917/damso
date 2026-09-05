@@ -35,6 +35,8 @@ public final class IdUtil {
     public static final String TAG = "TAG";
     public static final String NOTICE = "NTC";
     public static final String INQUIRY = "INQ";
+    public static final String KEYWORD = "KWD";
+    public static final String RECALL = "RCL";
 
     /**
      * base36으로 적은 epoch millis의 자릿수. {@code Long.MAX_VALUE}가 13자리라 이 폭을 넘길 수

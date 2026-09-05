@@ -3,10 +3,12 @@ package hanium.damso.service.impl;
 import hanium.damso.dto.ChatDTO;
 import hanium.damso.dto.ContentDTO;
 import hanium.damso.dto.LLMDTO;
+import hanium.damso.dto.RecallDTO;
 import hanium.damso.mapper.IChatMapper;
 import hanium.damso.service.IChatService;
 import hanium.damso.service.IContentService;
 import hanium.damso.service.ILLMService;
+import hanium.damso.service.IRecallService;
 import hanium.damso.util.IdUtil;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -25,6 +27,7 @@ public class ChatService implements IChatService {
     private final IChatMapper chatMapper;
     private final IContentService contentService;
     private final ILLMService llmService;
+    private final IRecallService recallService;
 
     @Value("${damso.llm.prompt}")
     private String LLM_PROMPT;
@@ -148,16 +151,31 @@ public class ChatService implements IChatService {
         return pDTO;
     }
 
+    /**
+     * 답을 만들어 저장한다.
+     *
+     * <p>여기에 기억 회상 확인이 얹혀 있다. 세 자리 모두 <b>대화를 방해하지 않는 것</b>이
+     * 첫째 규칙이라, 검사 쪽에서 무슨 일이 나도 이 메서드는 평소처럼 답을 돌려준다.
+     * {@code recallService}의 세 메서드가 예외를 밖으로 내보내지 않는 이유가 그것이다.
+     */
     @Override
-    public ChatDTO.MessageDTO requestReply(String roomId, String userName) throws Exception {
+    public ChatDTO.MessageDTO requestReply(String roomId, String userId, String userName) throws Exception {
         List<ChatDTO.MessageDTO> recent = chatMapper.selectRecentMessages(roomId, LLM_HISTORY_TURNS);
         if (recent == null || recent.isEmpty()) return null;
 
         // 매퍼가 최신순으로 뽑아 준다. 모델에는 오래된 것부터 가야 한다.
         Collections.reverse(recent);
 
+        // 지난 턴에 여쭌 것이 있으면, 방금 들어온 발화가 그 답이다. 채점은 답을 만들기 전에
+        // 끝내 둔다 — 모델 호출이 실패해도 어르신의 대답은 이미 채점되어 있어야 한다.
+        ChatDTO.MessageDTO last = recent.get(recent.size() - 1);
+        if (last.getSenderType() == ChatDTO.MessageDTO.SenderType.USER)
+            recallService.gradeIfPending(userId, roomId, last.getId(), last.getMessage());
+
+        RecallDTO target = recallService.pickTarget(userId, recent.size());
+
         List<LLMDTO.MessageDTO> messages = new ArrayList<>();
-        messages.add(new LLMDTO.MessageDTO("system", this.systemPrompt(userName)));
+        messages.add(new LLMDTO.MessageDTO("system", this.systemPrompt(userName, target)));
         for (ChatDTO.MessageDTO m : recent) {
             // 빈 어시스턴트 턴은 건너뛴다. 그대로 실어 보내면 다음 요청의 히스토리가 오염되고,
             // 모델이 그 침묵을 따라 하기 시작한다.
@@ -179,6 +197,9 @@ public class ChatService implements IChatService {
 
         chatMapper.insertMessage(rDTO);
 
+        // 모델이 실제로 여쭈었을 때만 검사 한 건이 열린다. 여쭙지 않는 것도 모델의 자유다.
+        recallService.noteAsked(userId, roomId, target, rDTO.getId(), answer);
+
         return rDTO;
     }
 
@@ -191,11 +212,16 @@ public class ChatService implements IChatService {
      *
      * <p>프로퍼티가 "없음"이 아니라 "빈 문자열"인 것에 주의. {@code ${LLM_PROMPT:}}이므로
      * {@code @Value} 기본값에는 영영 닿지 않는다. 그래서 여기서 isBlank()로 본다.
+     *
+     * <p>회상 블록은 <b>덧붙이기만</b> 한다. {@code target}이 null이면 askBlock이 빈 문자열이라
+     * 결과가 예전과 완전히 같다 — 키워드를 하나도 등록하지 않은 사람의 대화가 이 기능 때문에
+     * 달라지는 일은 없어야 한다.
      */
-    private String systemPrompt(String userName) {
+    private String systemPrompt(String userName, RecallDTO target) {
         String template = (LLM_PROMPT == null || LLM_PROMPT.isBlank()) ? DEFAULT_LLM_PROMPT : LLM_PROMPT;
 
-        return template.replace("{username}", userName == null || userName.isBlank() ? "어르신" : userName);
+        return template.replace("{username}", userName == null || userName.isBlank() ? "어르신" : userName)
+                + recallService.askBlock(target);
     }
 
     static String clip(String title) {
