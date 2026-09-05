@@ -559,6 +559,7 @@ function Dashboard() {
           <CalendarView
             schedules={schedules}
             setSchedules={setSchedules}
+            subjectId={subjectId}
             subjectName={isGuardian ? subjectName : undefined}
             isGuardian={isGuardian}
             toast={setToast}
@@ -1015,12 +1016,14 @@ function GuardianHomeView({
 function CalendarView({
   schedules,
   setSchedules,
+  subjectId,
   subjectName,
   isGuardian,
   toast,
 }: {
   schedules: ApiSchedule[];
   setSchedules: React.Dispatch<React.SetStateAction<ApiSchedule[]>>;
+  subjectId?: string;
   subjectName?: string;
   isGuardian: boolean;
   toast: (toast: Toast) => void;
@@ -1146,12 +1149,14 @@ function CalendarView({
       title={subjectName ? `${subjectName}님의 일정 캘린더` : "일정 캘린더"}
       description="자동으로 기록된 일정과 직접 등록한 일정을 날짜별로 관리하세요."
       action={
-        <button
-          onClick={() => setAdding(true)}
-          className="rounded-xl bg-blue-600 px-5 py-3 text-sm font-black text-white shadow-lg shadow-blue-200"
-        >
-          ＋ 일정 직접 등록
-        </button>
+        subjectId ? (
+          <button
+            onClick={() => setAdding(true)}
+            className="rounded-xl bg-blue-600 px-5 py-3 text-sm font-black text-white shadow-lg shadow-blue-200"
+          >
+            ＋ 일정 직접 등록
+          </button>
+        ) : undefined
       }
     >
       {isGuardian && (
@@ -1359,23 +1364,20 @@ function CalendarView({
               진행해 주세요.
             </p>
           )}
-          {/* 쓰기는 본인만 할 수 있습니다. 보호자에게는 버튼을 아예 두지 않습니다. */}
-          {!isGuardian && (
-            <div className="mt-6 flex gap-2">
-              <button
-                onClick={() => void toggleDone(selectedEvent)}
-                className="flex-1 rounded-xl bg-emerald-50 py-3 font-black text-emerald-700"
-              >
-                {selectedEvent.status === "DONE" ? "예정으로 되돌리기" : "완료로 표시"}
-              </button>
-              <button
-                onClick={() => void removeSchedule(selectedEvent)}
-                className="rounded-xl px-5 font-black text-red-500"
-              >
-                삭제
-              </button>
-            </div>
-          )}
+          <div className="mt-6 flex gap-2">
+            <button
+              onClick={() => void toggleDone(selectedEvent)}
+              className="flex-1 rounded-xl bg-emerald-50 py-3 font-black text-emerald-700"
+            >
+              {selectedEvent.status === "DONE" ? "예정으로 되돌리기" : "완료로 표시"}
+            </button>
+            <button
+              onClick={() => void removeSchedule(selectedEvent)}
+              className="rounded-xl px-5 font-black text-red-500"
+            >
+              삭제
+            </button>
+          </div>
           <button
             onClick={() => setSelectedEvent(null)}
             className="mt-3 w-full rounded-xl bg-slate-900 py-3 font-black text-white"
@@ -1387,6 +1389,7 @@ function CalendarView({
       {adding && (
         <ScheduleForm
           initialDate={selectedDate}
+          subjectId={subjectId}
           onClose={() => setAdding(false)}
           onError={(message) => toast({ message })}
           onSaved={(schedule) => {
@@ -1412,11 +1415,13 @@ function CalendarView({
  */
 function ScheduleForm({
   initialDate,
+  subjectId,
   onClose,
   onSaved,
   onError,
 }: {
   initialDate: string;
+  subjectId?: string;
   onClose: () => void;
   onSaved: (schedule: ApiSchedule) => void;
   onError: (message: string) => void;
@@ -1437,6 +1442,7 @@ function ScheduleForm({
 
     setPending(true);
     const result = await createSchedule({
+      userId: subjectId,
       date,
       time,
       title: title.trim(),

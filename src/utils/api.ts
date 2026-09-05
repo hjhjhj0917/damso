@@ -333,6 +333,7 @@ export type ApiSchedule = {
 }
 
 type ScheduleFields = {
+  userId?: string
   title?: string
   date?: string
   time?: string
