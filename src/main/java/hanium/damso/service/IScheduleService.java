@@ -10,11 +10,11 @@ public interface IScheduleService {
 
     ScheduleDTO getInfo(String scheduleId) throws Exception;
 
-    ScheduleDTO create(ScheduleDTO pDTO) throws Exception;
+    ScheduleDTO create(ScheduleDTO pDTO, String editorId) throws Exception;
 
-    int update(ScheduleDTO pDTO) throws Exception;
+    int update(ScheduleDTO pDTO, String editorId) throws Exception;
 
-    int complete(String scheduleId, String userId, boolean done) throws Exception;
+    int complete(String scheduleId, String editorId, boolean done) throws Exception;
 
-    int delete(String scheduleId, String userId) throws Exception;
+    int delete(String scheduleId, String editorId) throws Exception;
 }

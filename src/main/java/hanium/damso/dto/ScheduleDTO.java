@@ -66,6 +66,8 @@ public class ScheduleDTO {
     private String contentId;
     private String userId;
 
+    private String createdBy;
+
     private String title;
     private Type scheduleType;
 

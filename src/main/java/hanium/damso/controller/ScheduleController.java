@@ -18,8 +18,6 @@ import java.util.regex.Pattern;
 
 /**
  * 일정 캘린더.
- *
- * <p>일기와 같은 권한 구조다 — <b>읽기는 본인과 연결된 보호자, 쓰기는 본인만.</b>
  */
 @Slf4j
 @RequestMapping(value = "/api/schedule")
@@ -34,15 +32,20 @@ public class ScheduleController {
     /** 프론트 <input type="time">이 보내는 모양. 초는 받지 않는다 — 일정에 초 단위는 의미가 없다. */
     private static final Pattern TIME_PATTERN = Pattern.compile("^([01]\\d|2[0-3]):[0-5]\\d$");
 
+    private String subject(HttpServletRequest request, String sessionUserId) {
+        String userId = request.getParameter("userId");
+        if (userId == null || userId.isBlank()) userId = sessionUserId;
+
+        return linkService.canView(userId, sessionUserId) ? userId : null;
+    }
+
     @GetMapping(value = "list")
     public ResultDTO<List<ScheduleDTO>> list(HttpServletRequest request, HttpSession session) {
         String sessionUserId = (String) session.getAttribute("SESSION_USER_ID");
         if (sessionUserId == null) return ResultDTO.error("INVALID_ACCESS");
 
-        String userId = request.getParameter("userId");
-        if (userId == null) userId = sessionUserId;
-
-        if (!linkService.canView(userId, sessionUserId)) return ResultDTO.error("INVALID_ACCESS");
+        String userId = this.subject(request, sessionUserId);
+        if (userId == null) return ResultDTO.error("INVALID_ACCESS");
 
         String from = request.getParameter("from");
         String to = request.getParameter("to");
@@ -80,7 +83,10 @@ public class ScheduleController {
 
     @PostMapping(value = "create")
     public ResultDTO<ScheduleDTO> create(HttpServletRequest request, HttpSession session) {
-        String userId = (String) session.getAttribute("SESSION_USER_ID");
+        String sessionUserId = (String) session.getAttribute("SESSION_USER_ID");
+        if (sessionUserId == null) return ResultDTO.error("INVALID_ACCESS");
+
+        String userId = this.subject(request, sessionUserId);
         if (userId == null) return ResultDTO.error("INVALID_ACCESS");
 
         ScheduleDTO pDTO = new ScheduleDTO();
@@ -102,7 +108,9 @@ public class ScheduleController {
         pDTO.setLocation(request.getParameter("location"));
 
         try {
-            return ResultDTO.success("CREATE_COMPLETE", scheduleService.create(pDTO));
+            return ResultDTO.success("CREATE_COMPLETE", scheduleService.create(pDTO, sessionUserId));
+        } catch (IllegalAccessException e) {
+            return ResultDTO.error("INVALID_ACCESS");
         } catch (IllegalArgumentException e) {
             return ResultDTO.error("INVALID_PARAMETER");
         } catch (NullPointerException e) {
@@ -122,7 +130,6 @@ public class ScheduleController {
         if (scheduleId == null) return ResultDTO.error("MISSING_PARAMETER");
 
         ScheduleDTO pDTO = ScheduleDTO.of(scheduleId);
-        pDTO.setUserId(userId);
         pDTO.setTitle(request.getParameter("title"));
         pDTO.setContent(request.getParameter("content"));
         pDTO.setLocation(request.getParameter("location"));
@@ -145,9 +152,11 @@ public class ScheduleController {
         if (status != null) pDTO.setStatus(ScheduleDTO.Status.of(status));
 
         try {
-            if (scheduleService.update(pDTO) != 1) return ResultDTO.error("NOT_FOUND");
+            if (scheduleService.update(pDTO, userId) != 1) return ResultDTO.error("NOT_FOUND");
 
             return ResultDTO.success("UPDATE_COMPLETE");
+        } catch (IllegalAccessException e) {
+            return ResultDTO.error("INVALID_ACCESS");
         } catch (NullPointerException e) {
             return ResultDTO.error("MISSING_PARAMETER");
         } catch (Exception e) {
@@ -173,6 +182,8 @@ public class ScheduleController {
                 return ResultDTO.error("NOT_FOUND");
 
             return ResultDTO.success("UPDATE_COMPLETE");
+        } catch (IllegalAccessException e) {
+            return ResultDTO.error("INVALID_ACCESS");
         } catch (Exception e) {
             log.warn("schedule complete failed", e);
             return ResultDTO.error("UNKNOWN_ERROR");
@@ -191,6 +202,8 @@ public class ScheduleController {
             if (scheduleService.delete(scheduleId, userId) != 1) return ResultDTO.error("NOT_FOUND");
 
             return ResultDTO.success("DELETE_COMPLETE");
+        } catch (IllegalAccessException e) {
+            return ResultDTO.error("INVALID_ACCESS");
         } catch (Exception e) {
             log.warn("schedule delete failed", e);
             return ResultDTO.error("UNKNOWN_ERROR");

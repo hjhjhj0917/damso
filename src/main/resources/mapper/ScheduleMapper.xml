@@ -16,6 +16,7 @@
         S.SCHEDULE_ID AS ID,
         S.CONTENT_ID,
         CM.USER_ID,
+        S.CREATED_BY,
         S.TITLE,
         S.SCHEDULE_TYPE,
         DATE_FORMAT(S.SCHEDULE_TIME, '%Y-%m-%d') AS `DATE`,
@@ -44,8 +45,8 @@
 
 
     <insert id="insertSchedule">
-        INSERT INTO SCHEDULE (SCHEDULE_ID, CONTENT_ID, TITLE, SCHEDULE_TYPE, SCHEDULE_TIME, CONTENT, LOCATION, STATUS)
-        VALUES (#{id}, #{contentId}, #{title}, #{scheduleType},
+        INSERT INTO SCHEDULE (SCHEDULE_ID, CONTENT_ID, CREATED_BY, TITLE, SCHEDULE_TYPE, SCHEDULE_TIME, CONTENT, LOCATION, STATUS)
+        VALUES (#{id}, #{contentId}, #{createdBy}, #{title}, #{scheduleType},
                 STR_TO_DATE(CONCAT(#{date}, ' ', #{time}), '%Y-%m-%d %H:%i'),
                 #{content}, #{location}, #{status})
     </insert>

@@ -4,6 +4,7 @@ import hanium.damso.dto.ContentDTO;
 import hanium.damso.dto.ScheduleDTO;
 import hanium.damso.mapper.IScheduleMapper;
 import hanium.damso.service.IContentService;
+import hanium.damso.service.ILinkService;
 import hanium.damso.service.IScheduleService;
 import hanium.damso.util.IdUtil;
 import lombok.RequiredArgsConstructor;
@@ -19,6 +20,7 @@ import java.util.List;
 public class ScheduleService implements IScheduleService {
     private final IScheduleMapper scheduleMapper;
     private final IContentService contentService;
+    private final ILinkService linkService;
 
     /** SCHEDULE.TITLE의 컬럼 폭. */
     static final int MAX_TITLE_LENGTH = 255;
@@ -37,19 +39,27 @@ public class ScheduleService implements IScheduleService {
         return scheduleMapper.selectSchedule(ScheduleDTO.of(scheduleId));
     }
 
+    private void requireEditable(String ownerId, String editorId) throws IllegalAccessException {
+        if (ownerId == null || editorId == null) throw new IllegalAccessException();
+        if (!linkService.canView(ownerId, editorId)) throw new IllegalAccessException();
+    }
+
     /** rollbackFor의 이유는 DiaryService.create 주석과 같다. */
     @Transactional(rollbackFor = Exception.class)
     @Override
-    public ScheduleDTO create(ScheduleDTO pDTO) throws Exception {
+    public ScheduleDTO create(ScheduleDTO pDTO, String editorId) throws Exception {
         if (pDTO.getUserId() == null) throw new NullPointerException();
         if (pDTO.getTitle() == null || pDTO.getTitle().isBlank()) throw new IllegalArgumentException();
         if (pDTO.getDate() == null || pDTO.getTime() == null) throw new NullPointerException();
+
+        this.requireEditable(pDTO.getUserId(), editorId);
 
         pDTO.setTitle(clip(pDTO.getTitle(), MAX_TITLE_LENGTH));
         pDTO.setLocation(clip(pDTO.getLocation(), MAX_LOCATION_LENGTH));
         if (pDTO.getScheduleType() == null) pDTO.setScheduleType(ScheduleDTO.Type.PERSONAL);
         if (pDTO.getStatus() == null) pDTO.setStatus(ScheduleDTO.Status.SCHEDULED);
 
+        pDTO.setCreatedBy(editorId);
         pDTO.setContentId(contentService.create(pDTO.getUserId(), ContentDTO.Type.SCHEDULE));
         pDTO.setId(IdUtil.generate(IdUtil.SCHEDULE));
 
@@ -60,14 +70,18 @@ public class ScheduleService implements IScheduleService {
 
     @Transactional(rollbackFor = Exception.class)
     @Override
-    public int update(ScheduleDTO pDTO) throws Exception {
-        if (pDTO.getId() == null || pDTO.getUserId() == null) throw new NullPointerException();
+    public int update(ScheduleDTO pDTO, String editorId) throws Exception {
+        if (pDTO.getId() == null) throw new NullPointerException();
+
+        ScheduleDTO saved = scheduleMapper.selectSchedule(ScheduleDTO.of(pDTO.getId()));
+        if (saved == null) return 0;
+
+        this.requireEditable(saved.getUserId(), editorId);
 
         pDTO.setTitle(clip(pDTO.getTitle(), MAX_TITLE_LENGTH));
         pDTO.setLocation(clip(pDTO.getLocation(), MAX_LOCATION_LENGTH));
 
-        ScheduleDTO saved = scheduleMapper.selectSchedule(ScheduleDTO.of(pDTO.getId()));
-        if (saved == null || !pDTO.getUserId().equals(saved.getUserId())) return 0;
+        pDTO.setUserId(saved.getUserId());
 
         // <set>이 통째로 비면 SQL 문법 오류가 난다. 고칠 것이 없으면 문장을 보내지 않는다.
         boolean touchesAnything = pDTO.getTitle() != null || pDTO.getScheduleType() != null
@@ -83,27 +97,31 @@ public class ScheduleService implements IScheduleService {
 
     @Transactional(rollbackFor = Exception.class)
     @Override
-    public int complete(String scheduleId, String userId, boolean done) throws Exception {
+    public int complete(String scheduleId, String editorId, boolean done) throws Exception {
+        ScheduleDTO saved = scheduleMapper.selectSchedule(ScheduleDTO.of(scheduleId));
+        if (saved == null) return 0;
+
+        this.requireEditable(saved.getUserId(), editorId);
+
         ScheduleDTO pDTO = ScheduleDTO.of(scheduleId);
-        pDTO.setUserId(userId);
+        pDTO.setUserId(saved.getUserId());
         pDTO.setStatus(done ? ScheduleDTO.Status.DONE : ScheduleDTO.Status.SCHEDULED);
 
         int result = scheduleMapper.updateStatus(pDTO);
-        if (result > 0) {
-            ScheduleDTO saved = scheduleMapper.selectSchedule(ScheduleDTO.of(scheduleId));
-            if (saved != null) contentService.touch(saved.getContentId());
-        }
+        if (result > 0) contentService.touch(saved.getContentId());
 
         return result;
     }
 
     @Transactional(rollbackFor = Exception.class)
     @Override
-    public int delete(String scheduleId, String userId) throws Exception {
+    public int delete(String scheduleId, String editorId) throws Exception {
         ScheduleDTO saved = scheduleMapper.selectSchedule(ScheduleDTO.of(scheduleId));
         if (saved == null) return 0;
 
-        return contentService.delete(saved.getContentId(), userId);
+        this.requireEditable(saved.getUserId(), editorId);
+
+        return contentService.delete(saved.getContentId(), saved.getUserId());
     }
 
     static String clip(String value, int max) {
