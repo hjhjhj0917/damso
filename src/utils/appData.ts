@@ -14,6 +14,8 @@ import type {
   ApiInquiryCategory,
   ApiInquiryStatus,
   ApiNoticeCategory,
+  ApiRecallCategory,
+  ApiRecallPeriod,
   ApiSchedule,
   ApiScheduleType,
 } from './api'
@@ -188,6 +190,27 @@ export const inquiryStatusLabels: Record<ApiInquiryStatus, string> = {
   ANSWERING: '답변중',
   ANSWERED: '답변완료',
 }
+
+/** 기억 키워드 분류 라벨. 서버는 RECALL_KEYWORD.CATEGORY의 영문 상수로 줍니다. */
+export const recallCategoryLabels: Record<ApiRecallCategory, string> = {
+  FAMILY: '가족',
+  PLACE: '장소',
+  EVENT: '사건',
+  DAILY: '일상',
+  ETC: '기타',
+}
+
+/**
+ * 건강 리포트의 기간 선택.
+ *
+ * 화면에 적힌 말과 서버가 아는 상수를 여기서 잇습니다. 예전에는 select가 한국어 문자열만
+ * 들고 있어서 바꿔도 아무 일이 일어나지 않았습니다.
+ */
+export const recallPeriods: { value: ApiRecallPeriod; label: string }[] = [
+  { value: 'WEEK', label: '이번 주' },
+  { value: 'MONTH', label: '지난 4주' },
+  { value: 'QUARTER', label: '최근 3개월' },
+]
 
 /** 자서전 상태 라벨. */
 export function autobiographyStatusLabel(status: 'DRAFT' | 'DONE') {

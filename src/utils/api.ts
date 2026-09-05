@@ -65,6 +65,7 @@ const MESSAGES: Record<string, string> = {
   NO_SPEECH: '잘 못 들었어요. 다시 한 번 말씀해 주세요.',
   NOT_ENOUGH_SOURCE: '아직 기록이 부족해요. 도담과 조금 더 이야기를 나눠 주세요.',
   CONSENT_REQUIRED: '피보호인 계정 연결과 개인정보 이용 동의가 필요합니다.',
+  NO_KEYWORD: '등록된 기억 키워드가 없어요. 마이페이지에서 추가해 주세요.',
   ALREADY_LINKED: '이미 연결된 계정입니다.',
   UNKNOWN_ERROR: '알 수 없는 오류가 발생했습니다.',
 }
@@ -516,6 +517,102 @@ export const createInquiry = (params: {
   title: string
   content: string
 }) => post<ApiInquiry>('/api/inquiry/create', params)
+
+// ================= 기억 회상 =================
+//
+// 도담이 대화 중에 등록된 이야깃거리를 하나 슬쩍 여쭤보고, 어르신이 기억해 내셨는지를 서버가
+// 조용히 기록합니다. 그 기록이 건강 리포트의 "기억 하지 못한 횟수"입니다.
+//
+// 키워드는 어르신 본인과 연결된 보호자가 함께 관리합니다. 보호자는 userId에 피보호인의
+// 아이디를 실어 보냅니다 — 데일리노트·일정과 같은 방식입니다.
+//
+// 검사 기록을 낱개로 받는 함수는 없습니다. 서버가 집계만 내보냅니다 — 낱개 기록에는 어르신의
+// 발화가 걸려 있어서, 그 길을 열면 "대화 내용은 데일리노트 작성에만 사용됩니다"가 깨집니다.
+
+export type ApiRecallCategory = 'FAMILY' | 'PLACE' | 'EVENT' | 'DAILY' | 'ETC'
+
+export type ApiRecallPeriod = 'WEEK' | 'MONTH' | 'QUARTER'
+
+/**
+ * 서버 RecallDTO.
+ *
+ * userId는 언제나 어르신입니다. 보호자가 등록한 것도 마찬가지이고, 등록한 사람은 createdBy에만
+ * 남습니다.
+ */
+export type ApiKeyword = {
+  id: string
+  userId: string
+  category: ApiRecallCategory
+  /** 무엇을 여쭐지. 예: "손녀 이름" */
+  term: string
+  /** 맞는 답. 예: "지민" */
+  answer: string
+  hint?: string
+  createdBy?: string
+  /** 마지막으로 여쭌 때. 한 번도 안 여쭸으면 오지 않습니다. */
+  lastAskedAt?: number
+  createdAt: number
+  updatedAt: number
+}
+
+/** 차트 막대 하나. 구간을 나누는 것도 label을 붙이는 것도 서버입니다 — 기간마다 단위가 다릅니다. */
+export type ApiRecallBucket = {
+  label: string
+  /** 구간의 첫날 YYYY-MM-DD. */
+  date: string
+  asked: number
+  hit: number
+  miss: number
+  /** 그 구간에 검사가 없었으면 오지 않습니다. 0%와 "없음"은 다릅니다. */
+  rate?: number
+}
+
+export type ApiRecallReport = {
+  period: ApiRecallPeriod
+  from: string
+  to: string
+  /** 등록된 키워드 수. 0이면 화면은 수치 대신 "아직 없음"을 그립니다. */
+  keywordCount: number
+  /** 채점이 끝난 검사 수. 여쭸지만 답을 못 들은 것은 세지 않습니다. */
+  asked: number
+  hit: number
+  miss: number
+  unclear: number
+  /** 분모(hit+miss)가 0이면 오지 않습니다. */
+  rate?: number
+  buckets: ApiRecallBucket[]
+}
+
+type KeywordFields = {
+  term?: string
+  answer?: string
+  category?: ApiRecallCategory
+  hint?: string
+}
+
+export const fetchKeywords = (userId?: string) =>
+  get<ApiKeyword[]>('/api/recall/keywords', { userId })
+
+export const createKeyword = (fields: KeywordFields & { userId?: string }) =>
+  post<ApiKeyword>('/api/recall/keyword/create', fields)
+
+export const updateKeyword = (keywordId: string, fields: KeywordFields) =>
+  post('/api/recall/keyword/update', { keywordId, ...fields })
+
+export const deleteKeyword = (keywordId: string) =>
+  post('/api/recall/keyword/delete', { keywordId })
+
+/**
+ * 데일리노트를 읽어 후보를 뽑아 봅니다. 저장하지 않습니다 — 무엇을 등록할지는 사람이 고릅니다.
+ *
+ * 대화가 아니라 노트를 읽습니다. 보호자도 이 버튼을 누를 수 있고, 대화에서 뽑은 이야깃거리는
+ * 결국 대화 내용의 우회 유출이기 때문입니다.
+ */
+export const suggestKeywords = (userId?: string) =>
+  post<ApiKeyword[]>('/api/recall/keyword/suggest', { userId })
+
+export const fetchRecallReport = (params: { userId?: string; period?: ApiRecallPeriod }) =>
+  get<ApiRecallReport>('/api/recall/report', params)
 
 // ================= 음성 =================
 //

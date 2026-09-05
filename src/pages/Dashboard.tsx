@@ -6,12 +6,14 @@ import {
   completeSchedule,
   createChatRoom,
   createComment,
+  createKeyword,
   createLink,
   createSchedule,
   deleteAutobiography as deleteAutobiographyRequest,
   deleteChatRoom,
   deleteComment,
   deleteDiary,
+  deleteKeyword,
   deleteLink,
   deleteSchedule,
   errorMessage,
@@ -20,18 +22,22 @@ import {
   fetchComments,
   fetchDiaries,
   fetchDiary,
+  fetchKeywords,
   fetchLinks,
   fetchMessages,
   fetchNotices,
+  fetchRecallReport,
   fetchSchedules,
   fetchSpeechConfig,
   generateAutobiography,
   generateDiary,
   messageOf,
   say,
+  suggestKeywords,
   transcribe,
   updateAutobiography,
   updateComment,
+  updateKeyword,
   updateProfile,
   verifyWard,
   withdraw as withdrawRequest,
@@ -41,7 +47,11 @@ import {
   type ApiDiary,
   type ApiLink,
   type ApiMessage,
+  type ApiKeyword,
   type ApiNotice,
+  type ApiRecallCategory,
+  type ApiRecallPeriod,
+  type ApiRecallReport,
   type ApiSchedule,
 } from "../utils/api";
 import AdminView from "./AdminView";
@@ -63,6 +73,8 @@ import {
   navItems,
   noticeCategoryLabels,
   quickPrompts,
+  recallCategoryLabels,
+  recallPeriods,
   scheduleReminderMessage,
   scheduleStatusLabel,
   toKoreanTimeLabel,
@@ -565,6 +577,7 @@ function Dashboard() {
         {activeTab === "health" && (
           <HealthView
             toast={setToast}
+            subjectId={subjectId}
             subjectName={isGuardian ? subjectName : undefined}
             careGroupKey={careGroupKey}
             guardians={guardianLinks}
@@ -3008,17 +3021,96 @@ function BiographyView({
 
 function HealthView({
   toast,
+  subjectId,
   subjectName,
   careGroupKey,
   guardians,
 }: {
   toast: (toast: Toast) => void;
+  /** 누구의 리포트인가. 보호자면 피보호인, 어르신이면 본인. */
+  subjectId?: string;
   subjectName?: string;
   careGroupKey: string;
   guardians: ApiLink[];
 }) {
-  const [period, setPeriod] = useState("이번 주");
+  const [period, setPeriod] = useState<ApiRecallPeriod>("WEEK");
   const [sharing, setSharing] = useState(false);
+
+  /**
+   * 기억 회상 집계. 이 화면에서 서버가 채워 주는 것은 이것 하나입니다 — 나머지 수치는 아직
+   * 목업이고, 그 자리마다 주석으로 표시해 두었습니다.
+   *
+   * null은 "아직 못 받았다"입니다. 0건과 다릅니다 — 받기 전에 0을 그리면 잠깐이지만
+   * "한 번도 기억 못 하셨다"로 보입니다.
+   */
+  const reportKey = `${subjectId ?? ""}|${period}`;
+
+  /**
+   * 받아 온 집계를 그것이 속한 조회 조건과 함께 들고 있습니다.
+   *
+   * 기간을 바꿀 때 effect 안에서 null로 되돌리지 않는 이유: 그렇게 하면 setState가 effect
+   * 본문에서 동기적으로 불려 렌더가 한 번 더 돕니다(eslint react-hooks/set-state-in-effect).
+   * 대신 조건을 함께 저장해 두고, 지금 보고 있는 조건과 다르면 아직 못 받은 것으로 봅니다.
+   */
+  const [loaded, setLoaded] = useState<{
+    key: string;
+    data: ApiRecallReport;
+  } | null>(null);
+
+  useEffect(() => {
+    if (!subjectId) return;
+
+    let cancelled = false;
+
+    void fetchRecallReport({ userId: subjectId, period }).then((result) => {
+      if (cancelled) return;
+      if (result.status === "success" && result.data) {
+        setLoaded({ key: `${subjectId}|${period}`, data: result.data });
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [subjectId, period]);
+
+  const report = loaded?.key === reportKey ? loaded.data : null;
+
+  const periodLabel =
+    recallPeriods.find((item) => item.value === period)?.label ?? "이번 주";
+
+  // 키워드가 없으면 실패 0건이 아니라 "아직 확인한 적이 없음"입니다. 둘을 같은 화면으로
+  // 그리면 아무것도 등록하지 않은 사람이 가장 건강해 보입니다.
+  const hasChecks = report !== null && report.keywordCount > 0;
+  const missValue = report === null ? "—" : hasChecks ? String(report.miss) : "—";
+  const missState =
+    report === null
+      ? "확인 중"
+      : !hasChecks
+        ? "미설정"
+        : report.miss === 0
+          ? "좋음"
+          : report.miss <= 2
+            ? "양호"
+            : "주의";
+  const missColor =
+    report === null || !hasChecks
+      ? "slate"
+      : report.miss === 0
+        ? "emerald"
+        : report.miss <= 2
+          ? "amber"
+          : "rose";
+
+  const buckets = report?.buckets ?? [];
+  const trendBadge =
+    report?.rate === undefined
+      ? ""
+      : report.rate >= 80
+        ? "전반적으로 안정"
+        : report.rate >= 60
+          ? "조금씩 지켜보는 중"
+          : "주의가 필요해요";
   const hospitalsKey = `ansimMyHospitals:${careGroupKey}`;
   const [hospitals, setHospitals] = useState<MyHospital[]>(() =>
     loadStored<MyHospital[]>(hospitalsKey, []),
@@ -3063,17 +3155,20 @@ function HealthView({
           )}
           <select
             value={period}
-            onChange={(e) => setPeriod(e.target.value)}
+            onChange={(e) => setPeriod(e.target.value as ApiRecallPeriod)}
             className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-black"
           >
-            <option>이번 주</option>
-            <option>지난 4주</option>
-            <option>최근 3개월</option>
+            {recallPeriods.map((item) => (
+              <option key={item.value} value={item.value}>
+                {item.label}
+              </option>
+            ))}
           </select>
         </div>
       }
     >
       <section className="grid gap-5 md:grid-cols-3">
+        {/* 목업입니다. 복약률은 일정(SCHEDULE)에서 뽑을 수 있지만 아직 잇지 않았습니다. */}
         <HealthMetric
           icon="✓"
           label="복약"
@@ -3082,14 +3177,19 @@ function HealthView({
           state="양호"
           color="amber"
         />
+        {/*
+          이 타일만 실데이터입니다. 도담이 대화 중에 여쭌 것을 어르신이 기억해 내지 못하신
+          횟수이고, 서버의 RECALL_LOG에서 옵니다.
+        */}
         <HealthMetric
           icon="?"
           label="기억 하지 못한 횟수"
-          value="4"
-          unit="회"
-          state="주의"
-          color="rose"
+          value={missValue}
+          unit={hasChecks ? "회" : periodLabel}
+          state={missState}
+          color={missColor}
         />
+        {/* 목업입니다. 수면은 측정할 곳이 아직 없습니다. */}
         <HealthMetric
           icon="◷"
           label="평균 수면"
@@ -3099,6 +3199,12 @@ function HealthView({
           color="violet"
         />
       </section>
+      {report !== null && report.keywordCount === 0 && (
+        <p className="mt-3 rounded-2xl bg-slate-50 px-5 py-4 text-sm font-bold text-slate-500">
+          아직 기억 키워드를 등록하지 않으셨어요. 마이페이지의 ‘기억 키워드 관리’에서
+          이야깃거리를 몇 개 등록해 두시면, 도담이 대화 중에 자연스럽게 여쭤봅니다.
+        </p>
+      )}
       <section className="mt-6 grid gap-6 xl:grid-cols-[1.4fr_1fr]">
         <div className="rounded-[1.5rem] border border-slate-200 bg-white p-6 shadow-sm">
           <div className="flex items-center justify-between">
@@ -3108,40 +3214,69 @@ function HealthView({
                 활동량과 기억 수준을 함께 분석했어요
               </p>
             </div>
-            <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-black text-emerald-600">
-              전반적으로 안정
-            </span>
+            {trendBadge && (
+              <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-black text-emerald-600">
+                {trendBadge}
+              </span>
+            )}
           </div>
-          <div className="mt-8 flex h-52 items-end justify-between gap-3 border-b border-slate-200 px-2">
-            {[60, 76, 66, 88, 72, 90, 82].map((height, index) => (
-              <div
-                key={index}
-                className="flex h-full flex-1 flex-col items-center justify-end"
-              >
+          {buckets.length === 0 ? (
+            <div className="mt-8 flex h-52 items-center justify-center rounded-2xl border border-dashed border-slate-200">
+              <p className="text-sm font-bold text-slate-400">
+                {report === null
+                  ? "불러오는 중이에요."
+                  : "아직 보여 드릴 기록이 없어요."}
+              </p>
+            </div>
+          ) : (
+            <div className="mt-8 flex h-52 items-end justify-between gap-3 border-b border-slate-200 px-2">
+              {buckets.map((bucket, index) => (
                 <div
-                  className="relative w-full max-w-10 rounded-t-lg bg-blue-100"
-                  style={{ height: `${height}%` }}
+                  key={bucket.date}
+                  className="flex h-full flex-1 flex-col items-center justify-end gap-1"
                 >
-                  <div
-                    className="absolute bottom-0 w-full rounded-t-lg bg-blue-500"
-                    style={{ height: `${height - 18}%` }}
-                  />
+                  <div className="flex h-full w-full max-w-12 items-end justify-center gap-1">
+                    {/*
+                      활동량은 목업입니다. 걸음 수를 받아 오는 곳이 아직 없어서, 막대 개수만
+                      실제 구간 수에 맞춰 돌려 씁니다. 기억 수준이 붙는 자리와 나란히 두려고
+                      남겨 둔 자리입니다.
+                    */}
+                    <div
+                      className="w-full rounded-t-lg bg-blue-200"
+                      style={{ height: `${[60, 76, 66, 88, 72, 90, 82][index % 7]}%` }}
+                    />
+                    {/*
+                      기억 수준은 실데이터입니다. 그 구간의 회상 성공률(%)이고, 검사가 없던
+                      구간은 rate가 오지 않아 막대를 그리지 않습니다 — 0%로 그리면 안 물어본
+                      날이 전부 틀린 날로 보입니다.
+                    */}
+                    <div
+                      className="w-full rounded-t-lg bg-blue-600"
+                      style={{ height: `${bucket.rate ?? 0}%` }}
+                      title={
+                        bucket.rate === undefined
+                          ? `${bucket.label} · 확인한 적 없음`
+                          : `${bucket.label} · ${bucket.hit}/${bucket.asked} 기억`
+                      }
+                    />
+                  </div>
+                  <span className="mt-1 text-xs font-bold text-slate-400">
+                    {bucket.label}
+                  </span>
                 </div>
-                <span className="mt-2 text-xs font-bold text-slate-400">
-                  {["월", "화", "수", "목", "금", "토", "일"][index]}
-                </span>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
           <div className="mt-5 flex justify-center gap-6 text-xs font-bold text-slate-500">
             <span>
-              ● <i className="not-italic text-blue-600">활동량</i>
+              ● <i className="not-italic text-blue-200">활동량</i>
             </span>
             <span>
-              ● <i className="not-italic text-blue-200">기억 수준</i>
+              ● <i className="not-italic text-blue-600">기억 수준</i>
             </span>
           </div>
         </div>
+        {/* 목업입니다. 혈압·검진 주기를 받아 오는 곳이 아직 없습니다. 병원 목록만 실제 값입니다. */}
         <div className="rounded-[1.5rem] border border-amber-200 bg-gradient-to-br from-amber-50 to-orange-50 p-6">
           <div className="flex items-start gap-4">
             <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-amber-100 text-2xl">
@@ -3258,6 +3393,7 @@ function HealthView({
           </div>
         )}
       </section>
+      {/* 목업입니다. 음성 AI 분석이 붙기 전까지 자리를 지킵니다. */}
       <section className="mt-6 grid gap-5 md:grid-cols-2">
         <div className="rounded-[1.5rem] border border-slate-200 bg-white p-6">
           <h2 className="text-lg font-black">AI가 발견한 좋은 습관</h2>
@@ -3297,8 +3433,12 @@ function HealthView({
       {sharing && (
         <FamilyShareModal
           type="건강 리포트"
-          title={`${period} 건강 리포트`}
-          summary="안심 지수 86점 · 혈압과 수면 상태 안정 · 정기 검진 권장"
+          title={`${periodLabel} 건강 리포트`}
+          summary={
+            hasChecks && report !== null && report.asked > 0
+              ? `${periodLabel} 기억 확인 ${report.asked}회 중 ${report.miss}회 기억하지 못하셨어요`
+              : "안심 지수 86점 · 혈압과 수면 상태 안정 · 정기 검진 권장"
+          }
           guardians={guardians}
           onClose={() => setSharing(false)}
         />
@@ -3721,6 +3861,13 @@ function MyPage({
   const [passwordResetOpen, setPasswordResetOpen] = useState(false);
   const [guardianManageOpen, setGuardianManageOpen] = useState(false);
   const [privacyOpen, setPrivacyOpen] = useState(false);
+  /**
+   * 누구의 기억 키워드를 관리하는가. 어르신이면 본인, 보호자면 연결된 피보호인.
+   *
+   * 연결이 없는 보호자는 undefined입니다 — 그때는 섹션 자체를 그리지 않습니다.
+   */
+  const recallSubjectId = isGuardianAccount ? linkedWard?.wardId : session.id;
+
   const maskedPhone = session.phone
     ? `${session.phone.slice(0, 3)}-${session.phone.slice(3, 7)}-${session.phone.slice(7)}`
     : "";
@@ -4044,6 +4191,20 @@ function MyPage({
                   ))}
               </div>
             </div>
+          )}
+          {/*
+            기억 키워드는 어르신 본인과 연결된 보호자가 함께 관리합니다. 손녀 이름을 등록해
+            두는 일은 어르신보다 보호자가 하게 되는 경우가 많아서, 서버도 이 표만은 보호자에게
+            쓰기를 열어 둡니다.
+
+            연결이 없는 보호자에게는 그릴 것이 없습니다 — 누구의 키워드인지 정할 수 없습니다.
+          */}
+          {recallSubjectId && (
+            <RecallKeywordSection
+              subjectId={recallSubjectId}
+              subjectName={isGuardianAccount ? linkedName : undefined}
+              toast={toast}
+            />
           )}
           <div className="rounded-[1.5rem] border border-slate-200 bg-white p-6">
             <h2 className="text-xl font-black">설정 및 계정 관리</h2>
@@ -4985,6 +5146,392 @@ function Modal({
         {children}
       </div>
     </div>
+  );
+}
+
+/**
+ * 기억 키워드 관리.
+ *
+ * 도담이 대화 중에 여쭤볼 이야깃거리를 등록해 두는 곳입니다. 어르신 본인과 연결된 보호자가
+ * 함께 씁니다 — 서버가 canView로 판정하므로 화면에서 역할을 갈라 막지 않습니다.
+ *
+ * 하우스 룰대로 서버를 먼저 부르고 성공했을 때만 목록을 고칩니다. 여기서 먼저 그려 두면
+ * 저장에 실패한 키워드가 화면에만 남아, 어르신은 등록했다고 믿는데 도담은 영영 여쭙지 않습니다.
+ */
+function RecallKeywordSection({
+  subjectId,
+  subjectName,
+  toast,
+}: {
+  subjectId: string;
+  /** 보호자가 볼 때만 채워집니다. */
+  subjectName?: string;
+  toast: (toast: Toast) => void;
+}) {
+  /**
+   * 목록을 그것이 속한 피보호인과 함께 들고 있습니다. 보호자가 연결을 바꿔도 앞사람의
+   * 키워드가 한 프레임 남지 않습니다 — HealthView의 집계와 같은 이유이자 같은 방법입니다.
+   */
+  const [loaded, setLoaded] = useState<{
+    userId: string;
+    data: ApiKeyword[];
+  } | null>(null);
+  const [editing, setEditing] = useState<ApiKeyword | "new" | null>(null);
+  const [suggestions, setSuggestions] = useState<ApiKeyword[] | null>(null);
+  const [suggesting, setSuggesting] = useState(false);
+
+  const keywords = loaded?.userId === subjectId ? loaded.data : null;
+
+  const reload = async () => {
+    const result = await fetchKeywords(subjectId);
+    if (result.status === "success" && result.data) {
+      setLoaded({ userId: subjectId, data: result.data });
+    }
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+
+    void fetchKeywords(subjectId).then((result) => {
+      if (cancelled) return;
+      if (result.status === "success" && result.data) {
+        setLoaded({ userId: subjectId, data: result.data });
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [subjectId]);
+
+  const save = async (fields: {
+    term: string;
+    answer: string;
+    category: ApiRecallCategory;
+    hint: string;
+  }) => {
+    const target = editing;
+    const result =
+      target === "new"
+        ? await createKeyword({ userId: subjectId, ...fields })
+        : target
+          ? await updateKeyword(target.id, fields)
+          : null;
+
+    if (!result) return;
+    if (result.status !== "success") {
+      toast({ message: errorMessage(result) });
+      return;
+    }
+
+    setEditing(null);
+    await reload();
+    toast({
+      message: target === "new" ? "키워드를 등록했어요." : "키워드를 수정했어요.",
+      tone: "green",
+    });
+  };
+
+  const remove = async (keyword: ApiKeyword) => {
+    if (!window.confirm(`‘${keyword.term}’을(를) 삭제할까요?`)) return;
+
+    const result = await deleteKeyword(keyword.id);
+    if (result.status !== "success") {
+      toast({ message: errorMessage(result) });
+      return;
+    }
+
+    await reload();
+    toast({ message: "키워드를 삭제했어요.", tone: "green" });
+  };
+
+  /** 데일리노트에서 후보를 뽑아 봅니다. 저장은 사람이 고른 것만 합니다. */
+  const suggest = async () => {
+    setSuggesting(true);
+    const result = await suggestKeywords(subjectId);
+    setSuggesting(false);
+
+    if (result.status !== "success" || !result.data) {
+      toast({ message: errorMessage(result) });
+      return;
+    }
+    if (result.data.length === 0) {
+      toast({ message: "노트에서 뽑을 만한 이야깃거리를 찾지 못했어요." });
+      return;
+    }
+
+    setSuggestions(result.data);
+  };
+
+  const accept = async (candidate: ApiKeyword) => {
+    const result = await createKeyword({
+      userId: subjectId,
+      term: candidate.term,
+      answer: candidate.answer,
+      category: candidate.category,
+      hint: candidate.hint,
+    });
+
+    if (result.status !== "success") {
+      toast({ message: errorMessage(result) });
+      return;
+    }
+
+    setSuggestions((value) =>
+      value ? value.filter((item) => item.term !== candidate.term) : value,
+    );
+    await reload();
+    toast({ message: "키워드를 등록했어요.", tone: "green" });
+  };
+
+  return (
+    <div className="rounded-[1.5rem] border border-slate-200 bg-white p-6">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-xl font-black">
+            {subjectName ? `${subjectName}님의 기억 키워드` : "기억 키워드 관리"}
+          </h2>
+          <p className="mt-1 text-sm text-slate-400">
+            도담이 대화 중에 여쭤볼 이야깃거리예요.
+          </p>
+        </div>
+        <div className="flex gap-2">
+          <button
+            onClick={suggest}
+            disabled={suggesting}
+            className="rounded-xl bg-slate-100 px-4 py-2.5 text-sm font-black text-slate-600 disabled:opacity-50"
+          >
+            {suggesting ? "찾는 중…" : "노트에서 찾아보기"}
+          </button>
+          <button
+            onClick={() => setEditing("new")}
+            className="rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-black text-white shadow-lg shadow-blue-200"
+          >
+            ＋ 키워드 추가
+          </button>
+        </div>
+      </div>
+
+      {keywords === null ? (
+        <p className="mt-5 text-sm font-bold text-slate-400">불러오는 중이에요.</p>
+      ) : keywords.length === 0 ? (
+        <div className="mt-5 rounded-2xl border border-dashed border-slate-200 p-8 text-center">
+          <p className="text-sm font-bold text-slate-400">
+            아직 등록된 키워드가 없어요. 가족 이름이나 자주 가시던 곳처럼, 떠올리시면 좋을
+            이야깃거리를 등록해 보세요.
+          </p>
+        </div>
+      ) : (
+        <div className="mt-5 space-y-3">
+          {keywords.map((keyword) => (
+            <div
+              key={keyword.id}
+              className="flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-slate-50 p-4"
+            >
+              <div className="min-w-0">
+                <p className="font-black">
+                  <span className="mr-2 rounded-full bg-white px-2.5 py-1 text-xs font-black text-blue-600 shadow-sm">
+                    {recallCategoryLabels[keyword.category]}
+                  </span>
+                  {keyword.term}
+                </p>
+                <p className="mt-1 text-sm text-slate-500">답 · {keyword.answer}</p>
+                {keyword.hint && (
+                  <p className="mt-1 text-xs text-slate-400">힌트 · {keyword.hint}</p>
+                )}
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setEditing(keyword)}
+                  className="rounded-xl bg-white px-4 py-2.5 text-sm font-black text-slate-600 shadow-sm"
+                >
+                  수정
+                </button>
+                <button
+                  onClick={() => void remove(keyword)}
+                  className="rounded-xl bg-slate-200 px-3 py-2.5 text-sm font-black text-slate-600"
+                >
+                  삭제
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/*
+        화면에 적어 둡니다. 이것이 시험이 아니라는 것을 등록하는 사람이 알아야, 답을 못 하셨다는
+        보고를 받았을 때 어르신을 다그치지 않습니다.
+      */}
+      <p className="mt-5 text-xs leading-5 text-slate-400">
+        도담은 하루에 한 번, 대화의 흐름이 자연스러울 때만 지나가듯 여쭤봅니다. 답을 재촉하거나
+        정답을 알려 드리지 않고, 기억나지 않으신다고 하면 그대로 넘어갑니다.
+      </p>
+
+      {editing && (
+        <KeywordFormModal
+          keyword={editing === "new" ? undefined : editing}
+          onSave={save}
+          onClose={() => setEditing(null)}
+        />
+      )}
+      {suggestions && (
+        <Modal onClose={() => setSuggestions(null)}>
+          <h2 className="text-2xl font-black">노트에서 찾은 이야깃거리</h2>
+          <p className="mt-2 text-sm leading-6 text-slate-500">
+            데일리노트에서 뽑아 본 후보예요. 등록할 것만 고르시면 됩니다.
+          </p>
+          <div className="mt-5 space-y-3">
+            {suggestions.length === 0 ? (
+              <p className="text-sm font-bold text-slate-400">
+                남은 후보가 없어요.
+              </p>
+            ) : (
+              suggestions.map((candidate) => (
+                <div
+                  key={candidate.term}
+                  className="flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-slate-50 p-4"
+                >
+                  <div className="min-w-0">
+                    <p className="font-black">
+                      <span className="mr-2 rounded-full bg-white px-2.5 py-1 text-xs font-black text-blue-600 shadow-sm">
+                        {recallCategoryLabels[candidate.category]}
+                      </span>
+                      {candidate.term}
+                    </p>
+                    <p className="mt-1 text-sm text-slate-500">
+                      답 · {candidate.answer}
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => void accept(candidate)}
+                    className="rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-black text-white shadow-lg shadow-blue-200"
+                  >
+                    추가
+                  </button>
+                </div>
+              ))
+            )}
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+/** 키워드 한 개를 등록하거나 고칩니다. 등록과 수정이 같은 모달을 씁니다. */
+function KeywordFormModal({
+  keyword,
+  onSave,
+  onClose,
+}: {
+  keyword?: ApiKeyword;
+  onSave: (fields: {
+    term: string;
+    answer: string;
+    category: ApiRecallCategory;
+    hint: string;
+  }) => Promise<void>;
+  onClose: () => void;
+}) {
+  const [term, setTerm] = useState(keyword?.term ?? "");
+  const [answer, setAnswer] = useState(keyword?.answer ?? "");
+  const [hint, setHint] = useState(keyword?.hint ?? "");
+  const [category, setCategory] = useState<ApiRecallCategory>(
+    keyword?.category ?? "FAMILY",
+  );
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const submit = async () => {
+    if (term.trim().length === 0 || answer.trim().length === 0) {
+      setError("여쭤볼 것과 답을 모두 입력해 주세요.");
+      return;
+    }
+
+    setError("");
+    setSaving(true);
+    await onSave({
+      term: term.trim(),
+      answer: answer.trim(),
+      category,
+      hint: hint.trim(),
+    });
+    setSaving(false);
+  };
+
+  return (
+    <Modal onClose={onClose}>
+      <h2 className="text-2xl font-black">
+        {keyword ? "키워드 수정" : "기억 키워드 추가"}
+      </h2>
+      <p className="mt-2 text-sm leading-6 text-slate-500">
+        도담이 대화 중에 여쭤볼 이야깃거리 하나를 등록해요.
+      </p>
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          void submit();
+        }}
+        className="mt-6 space-y-4"
+      >
+        <label className="block">
+          <span className="text-sm font-black text-slate-500">분류</span>
+          <select
+            value={category}
+            onChange={(e) => setCategory(e.target.value as ApiRecallCategory)}
+            className="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 font-bold"
+          >
+            {(
+              Object.keys(recallCategoryLabels) as ApiRecallCategory[]
+            ).map((value) => (
+              <option key={value} value={value}>
+                {recallCategoryLabels[value]}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="block">
+          <span className="text-sm font-black text-slate-500">무엇을 여쭤볼까요</span>
+          <input
+            value={term}
+            onChange={(e) => setTerm(e.target.value.slice(0, 100))}
+            placeholder="예: 손녀 이름"
+            className="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 font-bold"
+          />
+        </label>
+        <label className="block">
+          <span className="text-sm font-black text-slate-500">맞는 답</span>
+          <input
+            value={answer}
+            onChange={(e) => setAnswer(e.target.value.slice(0, 255))}
+            placeholder="예: 지민"
+            className="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 font-bold"
+          />
+          {/* 어르신에게 보이지 않는다는 것을 등록하는 사람이 알아야 안심하고 적습니다. */}
+          <span className="mt-2 block text-xs text-slate-400">
+            도담에게는 알려 주지 않아요. 어르신의 대답이 맞는지 확인할 때만 씁니다.
+          </span>
+        </label>
+        <label className="block">
+          <span className="text-sm font-black text-slate-500">힌트 (선택)</span>
+          <input
+            value={hint}
+            onChange={(e) => setHint(e.target.value.slice(0, 255))}
+            placeholder="예: 주말마다 찾아오는 손녀"
+            className="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 font-bold"
+          />
+        </label>
+        {error && <p className="text-sm font-bold text-rose-600">{error}</p>}
+        <button
+          type="submit"
+          disabled={saving}
+          className="w-full rounded-xl bg-blue-600 py-3.5 font-black text-white shadow-lg shadow-blue-200 disabled:opacity-50"
+        >
+          {saving ? "저장하는 중…" : "저장"}
+        </button>
+      </form>
+    </Modal>
   );
 }
 
