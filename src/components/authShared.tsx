@@ -4,34 +4,6 @@ import { errorMessage } from '../utils/api'
 
 export type AccountType = 'user' | 'guardian' | 'admin'
 
-export type ParentProfile = {
-  name: string
-  birthDate?: string
-  residentFront: string
-  residentBackFirst: string
-  phone: string
-  relation: string
-  address: string
-  consentAt: string
-}
-
-type UserIdType = 'username' | 'email' | 'phone'
-
-export type SavedUser = {
-  id: string
-  idType: UserIdType
-  password: string
-  phone: string
-  name: string
-  email?: string
-  accountType?: AccountType
-  parent?: ParentProfile
-  // 기존 브라우저 저장 데이터와의 호환을 위해 이전 필드는 선택값으로 유지합니다.
-  carrier?: 'SKT' | 'KT' | 'LG U+' | '알뜰폰'
-  residentFront?: string
-  residentBackFirst?: string
-}
-
 export function normalizeId(value: string) {
   return value.trim().toLowerCase()
 }
@@ -76,26 +48,6 @@ export function toAccountType(roles: ApiUser['roles']): AccountType {
   if (roles === 'GUARDIAN') return 'guardian'
   if (roles === 'ADMIN') return 'admin'
   return 'user'
-}
-
-/*
- * 아래 localStorage 헬퍼는 이제 관리자 화면의 전체 회원 목록에만 남아 있습니다
- * (목록 조회 엔드포인트가 아직 없습니다).
- *
- * 보호자-어르신 연결은 USER_LINK 표와 /api/link/* 로 옮겨갔습니다. 그래서 여기 있던
- * getParentLink / saveParentLink 와 'ansimParentLinks' 저장 키는 예고대로 지웠습니다.
- * 그 값들은 브라우저 안에만 있었으므로, 저장값을 고치는 것만으로 누구의 보호자든 될 수
- * 있었습니다. 이제는 서버가 이름·생년월일·전화번호를 대조하고 동의 시각까지 남깁니다.
- */
-const USERS_STORAGE_KEY = 'ansimUsers'
-
-export function getSavedUsers(): SavedUser[] {
-  const savedUsers = localStorage.getItem(USERS_STORAGE_KEY)
-  return savedUsers ? (JSON.parse(savedUsers) as SavedUser[]) : []
-}
-
-export function saveSavedUsers(users: SavedUser[]) {
-  localStorage.setItem(USERS_STORAGE_KEY, JSON.stringify(users))
 }
 
 type EmailVerificationOptions = {

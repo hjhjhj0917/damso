@@ -54,7 +54,6 @@ import {
   type ApiRecallReport,
   type ApiSchedule,
 } from "../utils/api";
-import AdminView from "./AdminView";
 import { PrivacyView } from "./Support";
 import {
   ANONYMOUS_SESSION,
@@ -157,7 +156,6 @@ function Dashboard() {
     loadStored("ansimNotificationsEnabled", true),
   );
   const isGuardian = session.accountType === "guardian";
-  const isAdmin = session.accountType === "admin";
   // 연결 정보는 이제 서버(USER_LINK)가 갖습니다. 보호자에게는 첫 번째 피보호인이 그 대상입니다 —
   // 표는 여러 명을 담을 수 있지만 화면은 아직 한 명을 전제로 그려져 있습니다.
   const linkedWard = isGuardian ? links[0] : undefined;
@@ -184,7 +182,7 @@ function Dashboard() {
           : ["home", "mypage"]
         ).includes(item.id),
       )
-    : navItems.filter((item) => item.id !== "admin" || isAdmin);
+    : [...navItems];
   const visibleNotifications = notifications.filter(
     (notification) =>
       !notification.targetRole ||
@@ -598,7 +596,6 @@ function Dashboard() {
             setNotificationsEnabled={setNotificationsEnabled}
           />
         )}
-        {activeTab === "admin" && isAdmin && <AdminView />}
       </main>
 
       <nav className="fixed bottom-0 z-40 flex w-full justify-around border-t border-slate-200 bg-white px-1 py-2 lg:hidden">
@@ -3205,7 +3202,7 @@ function HealthView({
           color="violet"
         />
       </section>
-      {report !== null && report.keywordCount === 0 && (
+      {report !== null && report.keywordCount === 0 && subjectName && (
         <p className="mt-3 rounded-2xl bg-slate-50 px-5 py-4 text-sm font-bold text-slate-500">
           아직 기억 키워드를 등록하지 않으셨어요. 마이페이지의 ‘기억 키워드 관리’에서
           이야깃거리를 몇 개 등록해 두시면, 도담이 대화 중에 자연스럽게 여쭤봅니다.

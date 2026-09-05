@@ -92,8 +92,9 @@ export const ANONYMOUS_SESSION: SessionUser = {
  * 첫 화면을 즉시 그리기 위한 브라우저 사본.
  *
  * 권한 판단에는 절대 쓰지 않습니다 — 이 값은 사용자가 고칠 수 있으므로, accountType을 믿으면
- * 저장값을 'admin'으로 바꾸는 것만으로 관리자 화면이 열립니다. 그래서 저장값이 이상하면
- * 권한이 가장 낮은 'user'로 떨어뜨리고, 진짜 권한은 refresh()가 받아온 값이 정합니다.
+ * 저장값을 'guardian'으로 바꾸는 것만으로 피보호인의 기록을 보는 화면이 열립니다. 그래서
+ * 저장값이 이상하면 권한이 가장 낮은 'user'로 떨어뜨리고, 진짜 권한은 refresh()가 받아온
+ * 값이 정합니다.
  */
 export function readStoredSession(): SessionUser | null {
   const stored = loadStored<Partial<SessionUser> | null>(SESSION_STORAGE_KEY, null)

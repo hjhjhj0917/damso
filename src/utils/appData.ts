@@ -28,7 +28,6 @@ export const navItems = [
   { id: 'biography', label: '나의 자서전', icon: '▥' },
   { id: 'health', label: '건강 리포트', icon: '♡' },
   { id: 'mypage', label: '마이페이지', icon: '●' },
-  { id: 'admin', label: '관리자', icon: '🛠' },
 ] as const
 
 export type ServiceTab = (typeof navItems)[number]['id']

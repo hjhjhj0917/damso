@@ -3,7 +3,6 @@ import Header from './components/Header'
 import Home from './pages/Home'
 import Signup from './pages/Signup'
 import Dashboard from './pages/Dashboard'
-import About from './pages/About'
 import Support from './pages/Support'
 import NotFound from './pages/NotFound'
 
@@ -16,7 +15,6 @@ function App() {
         <Route path="/" element={<Home />} />
         <Route path="/signup" element={<Signup />} />
         <Route path="/dashboard/*" element={<Dashboard />} />
-        <Route path="/about" element={<About />} />
         <Route path="/support" element={<Support />} />
         <Route path="*" element={<NotFound />} />
       </Routes>
